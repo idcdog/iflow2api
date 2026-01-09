@@ -51,7 +51,7 @@ jobs:
           PYTHONUTF8: 1
         shell: bash
         run: |
-          echo "y" | flet build ${{ matrix.platform }} --project iflow2api --module-name iflow2api.gui --product iflow2api
+          echo "y" | flet build ${{ matrix.platform }} --project iflow2api --product iflow2api
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
