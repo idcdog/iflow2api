@@ -1,6 +1,6 @@
 """Flet 应用入口"""
 import flet as ft
-from src.iflow2api.gui import IFlow2ApiApp
+from iflow2api.gui import IFlow2ApiApp
 
 
 def main(page: ft.Page):
