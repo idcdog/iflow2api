@@ -33,7 +33,7 @@ curl http://localhost:8001/v1/chat/completions -H "Content-Type: application/jso
 ## Architecture
 
 ```
-src/iflow2api/
+iflow2api/
 ├── __init__.py      # 包初始化
 ├── __main__.py      # CLI 入口
 ├── main.py          # 主入口
