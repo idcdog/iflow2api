@@ -22,7 +22,7 @@ class IFlowProxy:
         return {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.config.api_key}",
-            "user-agent": IFLOW_CLI_USER_AGENT,  # 小写以匹配 curl 行为
+            "User-Agent": IFLOW_CLI_USER_AGENT,  # 大写以解锁 CLI 专属模型
         }
 
     async def _get_client(self) -> httpx.AsyncClient:
@@ -51,15 +51,40 @@ class IFlowProxy:
         # iFlow CLI 支持的模型列表 (来源: iflow-cli SUPPORTED_MODELS)
         models = [
             {"id": "glm-4.7", "name": "GLM-4.7", "description": "智谱 GLM-4.7 (推荐)"},
-            {"id": "iFlow-ROME-30BA3B", "name": "iFlow-ROME-30BA3B", "description": "iFlow ROME 30B (快速)"},
-            {"id": "deepseek-v3.2-chat", "name": "DeepSeek-V3.2", "description": "DeepSeek V3.2 对话模型"},
-            {"id": "qwen3-coder-plus", "name": "Qwen3-Coder-Plus", "description": "通义千问 Qwen3 Coder Plus"},
-            {"id": "kimi-k2-thinking", "name": "Kimi-K2-Thinking", "description": "Moonshot Kimi K2 思考模型"},
-            {"id": "minimax-m2.1", "name": "MiniMax-M2.1", "description": "MiniMax M2.1"},
-            {"id": "kimi-k2-0905", "name": "Kimi-K2-0905", "description": "Moonshot Kimi K2 0905"},
+            {
+                "id": "iFlow-ROME-30BA3B",
+                "name": "iFlow-ROME-30BA3B",
+                "description": "iFlow ROME 30B (快速)",
+            },
+            {
+                "id": "deepseek-v3.2-chat",
+                "name": "DeepSeek-V3.2",
+                "description": "DeepSeek V3.2 对话模型",
+            },
+            {
+                "id": "qwen3-coder-plus",
+                "name": "Qwen3-Coder-Plus",
+                "description": "通义千问 Qwen3 Coder Plus",
+            },
+            {
+                "id": "kimi-k2-thinking",
+                "name": "Kimi-K2-Thinking",
+                "description": "Moonshot Kimi K2 思考模型",
+            },
+            {
+                "id": "minimax-m2.1",
+                "name": "MiniMax-M2.1",
+                "description": "MiniMax M2.1",
+            },
+            {
+                "id": "kimi-k2-0905",
+                "name": "Kimi-K2-0905",
+                "description": "Moonshot Kimi K2 0905",
+            },
         ]
 
         import time
+
         current_time = int(time.time())
 
         # 返回 OpenAI 兼容格式
@@ -85,15 +110,15 @@ class IFlowProxy:
         stream: bool = False,
     ) -> dict | AsyncIterator[bytes]:
         """
-        调用 chat completions API
+                调用 chat completions API
 
-        Args:
-            request_body: 请求体
-            stream: 是否流式响应
+                Args:
+                    request_body: 请求体
+                    stream: 是否流式响应
 
         Returns:
-            非流式: 返回完整响应 dict
-            流式: 返回字节流迭代器
+                    非流式: 返回完整响应 dict
+                    流式: 返回字节流迭代器
         """
         client = await self._get_client()
 
@@ -106,7 +131,17 @@ class IFlowProxy:
                 json=request_body,
             )
             response.raise_for_status()
-            return response.json()
+            result = response.json()
+
+            # 确保 usage 统计信息存在 (OpenAI 兼容)
+            if "usage" not in result:
+                result["usage"] = {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                }
+
+            return result
 
     async def _stream_chat_completions(
         self,
@@ -152,9 +187,7 @@ class IFlowProxy:
         if method.upper() == "GET":
             response = await client.get(url, headers=self._get_headers())
         elif method.upper() == "POST":
-            response = await client.post(
-                url, headers=self._get_headers(), json=body
-            )
+            response = await client.post(url, headers=self._get_headers(), json=body)
         else:
             raise ValueError(f"不支持的 HTTP 方法: {method}")
 
