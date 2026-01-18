@@ -42,8 +42,8 @@ class IFlow2ApiApp:
         self.auto_start_checkbox: Optional[ft.Checkbox] = None
         self.start_minimized_checkbox: Optional[ft.Checkbox] = None
         self.auto_run_checkbox: Optional[ft.Checkbox] = None
-        self.start_btn: Optional[ft.ElevatedButton] = None
-        self.stop_btn: Optional[ft.ElevatedButton] = None
+        self.start_btn: Optional[ft.Button] = None
+        self.stop_btn: Optional[ft.Button] = None
         self.log_list: Optional[ft.ListView] = None
 
         self._setup_page()
@@ -113,7 +113,7 @@ class IFlow2ApiApp:
                 ]
             ),
             padding=15,
-            border=ft.border.all(1, ft.Colors.OUTLINE),
+            border=ft.Border.all(1, ft.Colors.OUTLINE),
             border_radius=8,
         )
 
@@ -137,7 +137,7 @@ class IFlow2ApiApp:
             on_click=self._import_from_cli,
         )
 
-        oauth_login_btn = ft.ElevatedButton(
+        oauth_login_btn = ft.Button(
             "Login with iFlow",
             icon=ft.Icons.LOGIN,
             on_click=self._login_with_iflow_oauth,
@@ -157,7 +157,7 @@ class IFlow2ApiApp:
                 ]
             ),
             padding=15,
-            border=ft.border.all(1, ft.Colors.OUTLINE),
+            border=ft.Border.all(1, ft.Colors.OUTLINE),
             border_radius=8,
         )
 
@@ -186,25 +186,25 @@ class IFlow2ApiApp:
                 ]
             ),
             padding=15,
-            border=ft.border.all(1, ft.Colors.OUTLINE),
+            border=ft.Border.all(1, ft.Colors.OUTLINE),
             border_radius=8,
         )
 
         # 操作按钮
-        self.start_btn = ft.ElevatedButton(
+        self.start_btn = ft.Button(
             "启动服务",
             icon=ft.Icons.PLAY_ARROW,
             on_click=self._start_server,
             style=ft.ButtonStyle(bgcolor=ft.Colors.GREEN, color=ft.Colors.WHITE),
         )
-        self.stop_btn = ft.ElevatedButton(
+        self.stop_btn = ft.Button(
             "停止服务",
             icon=ft.Icons.STOP,
             on_click=self._stop_server,
             disabled=True,
             style=ft.ButtonStyle(bgcolor=ft.Colors.RED, color=ft.Colors.WHITE),
         )
-        save_btn = ft.ElevatedButton(
+        save_btn = ft.Button(
             "保存配置",
             icon=ft.Icons.SAVE,
             on_click=self._save_settings,
@@ -229,7 +229,7 @@ class IFlow2ApiApp:
                     ft.Container(
                         content=self.log_list,
                         height=150,
-                        border=ft.border.all(1, ft.Colors.OUTLINE),
+                        border=ft.Border.all(1, ft.Colors.OUTLINE),
                         border_radius=8,
                         padding=10,
                     ),
