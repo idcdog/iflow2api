@@ -4,10 +4,12 @@
 
 ## 功能
 
-- 自动读取 iFlow CLI 的登录凭证 (`~/.iflow/settings.json`)
+- 自动读取 iFlow 配置文件 (`~/.iflow/settings.json`)
 - 提供 OpenAI 兼容的 API 端点
 - 支持流式和非流式响应
 - 通过 `User-Agent: iFlow-Cli` 解锁 CLI 专属高级模型
+- 内置 GUI OAuth 登录界面，无需安装 iFlow CLI
+- 支持 OAuth token 自动刷新
 
 ## 支持的模型
 
@@ -25,19 +27,36 @@
 
 ## 前置条件
 
-1. 安装 iFlow CLI:
-   ```bash
-   npm i -g @iflow-ai/iflow-cli
-   ```
+### 登录方式（二选一）
 
-2. 运行 `iflow` 并完成登录（选择 "Login with iFlow"）:
-   ```bash
-   iflow
-   ```
+#### 方式 1: 使用内置 GUI 登录（推荐）
 
-3. 确认配置文件已生成:
-   - Windows: `C:\Users\<用户名>\.iflow\settings.json`
-   - Linux/Mac: `~/.iflow/settings.json`
+无需安装 iFlow CLI，直接使用内置登录界面：
+
+```bash
+# 启动服务时会自动打开登录界面
+python -m iflow2api
+```
+
+点击界面上的 "OAuth 登录" 按钮，完成登录即可。
+
+#### 方式 2: 使用 iFlow CLI 登录
+
+如果你已安装 iFlow CLI，可以直接使用：
+
+```bash
+# 安装 iFlow CLI
+npm i -g @iflow-ai/iflow-cli
+
+# 运行登录
+iflow
+```
+
+### 配置文件
+
+登录后配置文件会自动生成：
+- Windows: `C:\Users\<用户名>\.iflow\settings.json`
+- Linux/Mac: `~/.iflow/settings.json`
 
 ## 安装
 
@@ -183,20 +202,29 @@ iFlow API 通过 `User-Agent` header 区分普通 API 调用和 CLI 调用:
 ## 项目结构
 
 ```
-src/iflow2api/
-├── __init__.py      # 包初始化
-├── __main__.py      # CLI 入口 (python -m iflow2api)
-├── main.py          # 主入口
-├── config.py        # iFlow 配置读取器
-├── proxy.py         # API 代理 (添加 User-Agent header)
-└── app.py           # FastAPI 应用
+iflow2api/
+├── __init__.py          # 包初始化
+├── __main__.py          # CLI 入口 (python -m iflow2api)
+├── main.py              # 主入口
+├── config.py            # iFlow 配置读取器 (从 ~/.iflow/settings.json)
+├── proxy.py             # API 代理 (添加 User-Agent header)
+├── app.py               # FastAPI 应用 (OpenAI 兼容端点)
+├── oauth.py             # OAuth 认证逻辑
+├── oauth_login.py       # OAuth 登录处理器
+├── token_refresher.py   # OAuth token 自动刷新
+├── settings.py          # 应用配置管理
+└── gui.py               # GUI 界面
 ```
 
 ## 常见问题
 
 ### Q: 提示 "iFlow 未登录"
 
-确保已运行 `iflow` 命令并完成登录，检查 `~/.iflow/settings.json` 文件是否存在且包含 `apiKey` 字段。
+确保已完成登录：
+- **GUI 方式**：点击界面上的 "OAuth 登录" 按钮
+- **CLI 方式**：运行 `iflow` 命令并完成登录
+
+检查 `~/.iflow/settings.json` 文件是否存在且包含 `apiKey` 字段。
 
 ### Q: 模型调用失败
 
@@ -207,6 +235,14 @@ src/iflow2api/
 ### Q: 如何更新模型列表
 
 模型列表硬编码在 `proxy.py` 中，来源于 iflow-cli 源码。如果 iFlow 更新了支持的模型，需要手动更新此列表。
+
+### Q: 是否必须安装 iFlow CLI？
+
+不是。从 v0.4.1 开始，项目内置了 GUI OAuth 登录功能，无需安装 iFlow CLI 即可使用。
+
+### Q: GUI 登录和 CLI 登录的配置可以共用吗？
+
+可以。两种登录方式都使用同一个配置文件 `~/.iflow/settings.json`，GUI 登录后命令行模式可以直接使用，反之亦然。
 
 ## License
 

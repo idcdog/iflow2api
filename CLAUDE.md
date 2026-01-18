@@ -7,9 +7,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **iflow2api** 是一个将 iFlow CLI 的 AI 服务暴露为 OpenAI 兼容 API 的代理服务。
 
 核心功能：
-- 自动读取 iFlow CLI 的登录凭证 (`~/.iflow/settings.json`)
+- 自动读取 iFlow 配置文件 (`~/.iflow/settings.json`)
 - 通过特殊 User-Agent (`iFlow-Cli`) 解锁 iFlow CLI 专属模型
 - 提供 OpenAI 兼容的 API 端点
+- 内置 GUI OAuth 登录界面，无需安装 iFlow CLI
+- 支持 OAuth token 自动刷新
 
 ## Build & Run Commands
 
@@ -53,12 +55,17 @@ curl http://localhost:8001/v1/chat/completions -H "Content-Type: application/jso
 
 ```
 iflow2api/
-├── __init__.py      # 包初始化
-├── __main__.py      # CLI 入口
-├── main.py          # 主入口
-├── config.py        # iFlow 配置读取器 (从 ~/.iflow/settings.json)
-├── proxy.py         # API 代理 (添加 user-agent: iFlow-Cli header)
-└── app.py           # FastAPI 应用 (OpenAI 兼容端点)
+├── __init__.py          # 包初始化
+├── __main__.py          # CLI 入口
+├── main.py              # 主入口
+├── config.py            # iFlow 配置读取器 (从 ~/.iflow/settings.json)
+├── proxy.py             # API 代理 (添加 user-agent: iFlow-Cli header)
+├── app.py               # FastAPI 应用 (OpenAI 兼容端点)
+├── oauth.py             # OAuth 认证逻辑
+├── oauth_login.py       # OAuth 登录处理器
+├── token_refresher.py   # OAuth token 自动刷新
+├── settings.py          # 应用配置管理
+└── gui.py               # GUI 界面
 ```
 
 ## Key Implementation Details
