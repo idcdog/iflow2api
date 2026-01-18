@@ -14,6 +14,8 @@ from .settings import (
     import_from_iflow_cli,
 )
 from .server import ServerManager, ServerState
+import webbrowser
+import asyncio
 
 
 class IFlow2ApiApp:
@@ -125,10 +127,17 @@ class IFlow2ApiApp:
             hint_text="https://apis.iflow.cn/v1",
         )
 
-        import_btn = ft.TextButton(
+import_btn = ft.TextButton(
             "从 iFlow CLI 导入配置",
             icon=ft.Icons.DOWNLOAD,
             on_click=self._import_from_cli,
+        )
+
+        oauth_login_btn = ft.ElevatedButton(
+            "Login with iFlow",
+            icon=ft.Icons.LOGIN,
+            on_click=self._login_with_iflow_oauth,
+            style=ft.ButtonStyle(bgcolor=ft.Colors.BLUE, color=ft.Colors.WHITE),
         )
 
         iflow_config = ft.Container(
@@ -136,7 +145,7 @@ class IFlow2ApiApp:
                 ft.Text("iFlow 配置", weight=ft.FontWeight.BOLD),
                 self.api_key_field,
                 self.base_url_field,
-                import_btn,
+                ft.Row([import_btn, oauth_login_btn], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
             ]),
             padding=15,
             border=ft.border.all(1, ft.Colors.OUTLINE),
@@ -340,7 +349,7 @@ class IFlow2ApiApp:
                 )
             )
 
-    def _on_auto_start_change(self, e):
+def _on_auto_start_change(self, e):
         """开机自启动设置变化"""
         success = set_auto_start(e.control.value)
         if success:
@@ -349,6 +358,12 @@ class IFlow2ApiApp:
             e.control.value = not e.control.value
             self.page.update()
             self._add_log("设置开机自启动失败")
+
+    def _login_with_iflow_oauth(self, e):
+        """使用 iFlow OAuth 登录"""
+        from .oauth_login import OAuthLoginHandler
+        handler = OAuthLoginHandler(self._add_log)
+        handler.start_login()
 
 
 def main(page: ft.Page):

@@ -12,6 +12,7 @@ from .config import load_iflow_config, IFlowConfig
 
 class AppSettings(BaseModel):
     """应用配置"""
+
     # 服务器配置
     host: str = "0.0.0.0"
     port: int = 8000
@@ -19,6 +20,12 @@ class AppSettings(BaseModel):
     # iFlow 配置
     api_key: str = ""
     base_url: str = "https://apis.iflow.cn/v1"
+
+    # OAuth 配置
+    auth_type: str = "api-key"  # 认证类型: oauth-iflow, api-key, openai-compatible
+    oauth_access_token: str = ""  # OAuth 访问令牌
+    oauth_refresh_token: str = ""  # OAuth 刷新令牌
+    oauth_expires_at: Optional[str] = None  # OAuth token 过期时间 (ISO 格式)
 
     # 应用设置
     auto_start: bool = False  # 开机自启动
@@ -72,7 +79,7 @@ def save_settings(settings: AppSettings) -> None:
 
 def get_exe_path() -> str:
     """获取当前可执行文件路径"""
-    if getattr(sys, 'frozen', False):
+    if getattr(sys, "frozen", False):
         # PyInstaller 打包后
         return sys.executable
     else:
@@ -95,7 +102,7 @@ def set_auto_start(enabled: bool) -> bool:
             winreg.HKEY_CURRENT_USER,
             r"Software\Microsoft\Windows\CurrentVersion\Run",
             0,
-            winreg.KEY_SET_VALUE | winreg.KEY_QUERY_VALUE
+            winreg.KEY_SET_VALUE | winreg.KEY_QUERY_VALUE,
         )
 
         if enabled:
@@ -126,7 +133,7 @@ def get_auto_start() -> bool:
             winreg.HKEY_CURRENT_USER,
             r"Software\Microsoft\Windows\CurrentVersion\Run",
             0,
-            winreg.KEY_QUERY_VALUE
+            winreg.KEY_QUERY_VALUE,
         )
 
         try:

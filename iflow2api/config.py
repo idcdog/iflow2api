@@ -4,16 +4,31 @@ import json
 import os
 from pathlib import Path
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from datetime import datetime
 
 
 class IFlowConfig(BaseModel):
     """iFlow 配置"""
+
     api_key: str
     base_url: str = "https://apis.iflow.cn/v1"
     model_name: Optional[str] = None
     cna: Optional[str] = None
     installation_id: Optional[str] = None
+    # OAuth 相关字段
+    auth_type: Optional[str] = Field(
+        default=None, description="认证类型: oauth-iflow, api-key, openai-compatible"
+    )
+    oauth_access_token: Optional[str] = Field(
+        default=None, description="OAuth 访问令牌"
+    )
+    oauth_refresh_token: Optional[str] = Field(
+        default=None, description="OAuth 刷新令牌"
+    )
+    oauth_expires_at: Optional[datetime] = Field(
+        default=None, description="OAuth token 过期时间"
+    )
 
 
 def get_iflow_config_path() -> Path:
@@ -45,8 +60,7 @@ def load_iflow_config() -> IFlowConfig:
 
     if not config_path.exists():
         raise FileNotFoundError(
-            f"iFlow 配置文件不存在: {config_path}\n"
-            "请先运行 iflow 命令并完成登录"
+            f"iFlow 配置文件不存在: {config_path}\n请先运行 iflow 命令并完成登录"
         )
 
     try:
@@ -67,10 +81,7 @@ def load_iflow_config() -> IFlowConfig:
     # 获取 API Key
     api_key = data.get("apiKey") or data.get("searchApiKey")
     if not api_key:
-        raise ValueError(
-            "iFlow 配置中缺少 API Key\n"
-            "请先运行 iflow 命令并完成登录"
-        )
+        raise ValueError("iFlow 配置中缺少 API Key\n请先运行 iflow 命令并完成登录")
 
     # 获取 Base URL
     base_url = data.get("baseUrl", "https://apis.iflow.cn/v1")
@@ -78,6 +89,15 @@ def load_iflow_config() -> IFlowConfig:
     # 获取其他可选配置
     model_name = data.get("modelName")
     cna = data.get("cna")
+
+    # 解析 OAuth token 过期时间
+    oauth_expires_at = None
+    expires_at_str = data.get("oauth_expires_at")
+    if expires_at_str:
+        try:
+            oauth_expires_at = datetime.fromisoformat(expires_at_str)
+        except (ValueError, TypeError):
+            pass
 
     # 尝试读取 installation_id
     installation_id = None
@@ -94,6 +114,10 @@ def load_iflow_config() -> IFlowConfig:
         model_name=model_name,
         cna=cna,
         installation_id=installation_id,
+        auth_type=auth_type,
+        oauth_access_token=data.get("oauth_access_token"),
+        oauth_refresh_token=data.get("oauth_refresh_token"),
+        oauth_expires_at=oauth_expires_at,
     )
 
 
