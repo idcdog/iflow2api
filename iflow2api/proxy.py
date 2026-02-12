@@ -1,5 +1,10 @@
 """API 代理服务 - 转发请求到 iFlow API"""
 
+import hmac
+import hashlib
+import time
+import uuid
+
 import httpx
 from typing import AsyncIterator, Optional
 from .config import IFlowConfig
@@ -9,6 +14,30 @@ from .config import IFlowConfig
 IFLOW_CLI_USER_AGENT = "iFlow-Cli"
 
 
+def generate_signature(user_agent: str, session_id: str, timestamp: int, api_key: str) -> str | None:
+    """
+    生成 iFlow API 签名 (HMAC-SHA256)
+    
+    签名算法来源于 iflow-cli 源码:
+    - 算法: HMAC-SHA256
+    - 密钥: apiKey
+    - 签名内容: `{user-agent}:{session-id}:{timestamp}`
+    - 输出: 十六进制字符串
+    """
+    if not api_key:
+        return None
+    message = f"{user_agent}:{session_id}:{timestamp}"
+    try:
+        return hmac.new(
+            api_key.encode('utf-8'),
+            message.encode('utf-8'),
+            hashlib.sha256
+        ).hexdigest()
+    except Exception as e:
+        print(f"[iflow2api] Failed to generate HMAC signature: {e}")
+        return None
+
+
 class IFlowProxy:
     """iFlow API 代理"""
 
@@ -16,21 +45,51 @@ class IFlowProxy:
         self.config = config
         self.base_url = config.base_url.rstrip("/")
         self._client: Optional[httpx.AsyncClient] = None
+        # 保持会话一致性
+        self._session_id = str(uuid.uuid4())
+        self._conversation_id = str(uuid.uuid4())
 
     def _get_headers(self) -> dict:
-        """获取请求头"""
-        return {
+        """
+        获取请求头
+        
+        模仿 iFlow CLI 的请求头设置:
+        - user-agent: iFlow-Cli
+        - session-id: 会话ID
+        - conversation-id: 对话ID
+        - x-iflow-signature: HMAC-SHA256 签名
+        - x-iflow-timestamp: 时间戳(毫秒)
+        """
+        timestamp = int(time.time() * 1000)  # 毫秒时间戳
+        
+        headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.config.api_key}",
-            "User-Agent": IFLOW_CLI_USER_AGENT,  # 大写以解锁 CLI 专属模型
+            "user-agent": IFLOW_CLI_USER_AGENT,
+            "session-id": self._session_id,
+            "conversation-id": self._conversation_id,
         }
+        
+        # 添加签名
+        signature = generate_signature(
+            IFLOW_CLI_USER_AGENT,
+            self._session_id,
+            timestamp,
+            self.config.api_key
+        )
+        if signature:
+            headers["x-iflow-signature"] = signature
+            headers["x-iflow-timestamp"] = str(timestamp)
+        
+        return headers
 
     async def _get_client(self) -> httpx.AsyncClient:
         """获取或创建 HTTP 客户端"""
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(300.0, connect=10.0),
-                follow_redirects=True,
+                # 禁用自动重定向，避免 POST 被转换成 GET 导致 405
+                follow_redirects=False,
             )
         return self._client
 
