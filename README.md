@@ -18,13 +18,16 @@
 
 | 模型 ID                | 名称              | 说明                      |
 | ---------------------- | ----------------- | ------------------------- |
-| `glm-5`              | GLM-5             | 智谱 GLM-5(推荐)          |
-| `iFlow-ROME-30BA3B`  | iFlow-ROME-30BA3B | iFlow ROME 30B (快速)     |
-| `deepseek-v3.2-chat` | DeepSeek-V3.2     | DeepSeek V3.2 对话模型    |
-| `qwen3-coder-plus`   | Qwen3-Coder-Plus  | 通义千问 Qwen3 Coder Plus |
-| `kimi-k2-thinking`   | Kimi-K2-Thinking  | Moonshot Kimi K2 思考模型 |
-| `minimax-m2.5`       | MiniMax-M2.5      | MiniMax M2.5              |
-| `kimi-k2.5`          | Kimi-K2.5         | Moonshot Kimi K2.5        |
+| `glm-4.6`             | GLM-4.6           | 智谱 GLM-4.6              |
+| `glm-4.7`             | GLM-4.7           | 智谱 GLM-4.7              |
+| `glm-5`               | GLM-5             | 智谱 GLM-5 (推荐)         |
+| `iFlow-ROME-30BA3B`   | iFlow-ROME-30BA3B | iFlow ROME 30B (快速)     |
+| `deepseek-v3.2-chat`  | DeepSeek-V3.2     | DeepSeek V3.2 对话模型    |
+| `qwen3-coder-plus`    | Qwen3-Coder-Plus  | 通义千问 Qwen3 Coder Plus |
+| `kimi-k2`             | Kimi-K2           | Moonshot Kimi K2          |
+| `kimi-k2-thinking`    | Kimi-K2-Thinking  | Moonshot Kimi K2 思考模型 |
+| `kimi-k2.5`           | Kimi-K2.5         | Moonshot Kimi K2.5        |
+| `minimax-m2.5`        | MiniMax-M2.5      | MiniMax M2.5              |
 
 > 模型列表来源于 iflow-cli 源码，可能随 iFlow 更新而变化。
 
@@ -84,7 +87,7 @@ python -m iflow2api
 iflow2api
 ```
 
-服务默认运行在 `http://localhost:8000`
+服务默认运行在 `http://localhost:28000`
 
 ### 自定义端口
 
@@ -111,20 +114,20 @@ python -c "import uvicorn; from iflow2api.app import app; uvicorn.run(app, host=
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://localhost:8000/v1",
+    base_url="http://localhost:28000/v1",
     api_key="not-needed"  # API Key 从 iFlow 配置自动读取
 )
 
 # 非流式请求
 response = client.chat.completions.create(
-    model="glm-4.7",
+    model="glm-5",
     messages=[{"role": "user", "content": "你好！"}]
 )
 print(response.choices[0].message.content)
 
 # 流式请求
 stream = client.chat.completions.create(
-    model="glm-4.7",
+    model="glm-5",
     messages=[{"role": "user", "content": "写一首诗"}],
     stream=True
 )
@@ -137,21 +140,21 @@ for chunk in stream:
 
 ```bash
 # 获取模型列表
-curl http://localhost:8000/v1/models
+curl http://localhost:28000/v1/models
 
 # 非流式请求
-curl http://localhost:8000/v1/chat/completions \
+curl http://localhost:28000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "glm-4.7",
+    "model": "glm-5",
     "messages": [{"role": "user", "content": "你好！"}]
   }'
 
 # 流式请求
-curl http://localhost:8000/v1/chat/completions \
+curl http://localhost:28000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "glm-4.7",
+    "model": "glm-5",
     "messages": [{"role": "user", "content": "你好！"}],
     "stream": true
   }'
@@ -166,7 +169,7 @@ iflow2api 提供了 Anthropic 兼容的 `/v1/messages` 端点，可以直接对�
 在 `~/.zshrc`（或 `~/.bashrc`）中添加：
 
 ```bash
-export ANTHROPIC_BASE_URL="http://localhost:8000"
+export ANTHROPIC_BASE_URL="http://localhost:28000"
 export ANTHROPIC_MODEL="glm-5" # kimi-k2.5, minimax-m2.5
 export ANTHROPIC_API_KEY="sk-placeholder"  # 任意非空值即可，认证信息从 iFlow 配置自动读取
 ```
@@ -201,9 +204,9 @@ python -m iflow2api
 
 本服务兼容以下 OpenAI 兼容客户端:
 
-- **Claude Code**: 设置 `ANTHROPIC_BASE_URL=http://localhost:8000`（详见上方指南）
-- **ChatGPT-Next-Web**: 设置 API 地址为 `http://localhost:8000`
-- **LobeChat**: 添加 OpenAI 兼容提供商，Base URL 设为 `http://localhost:8000/v1`
+- **Claude Code**: 设置 `ANTHROPIC_BASE_URL=http://localhost:28000`（详见上方指南）
+- **ChatGPT-Next-Web**: 设置 API 地址为 `http://localhost:28000`
+- **LobeChat**: 添加 OpenAI 兼容提供商，Base URL 设为 `http://localhost:28000/v1`
 - **Open WebUI**: 添加 OpenAI 兼容连接
 - **其他 OpenAI SDK 兼容应用**
 

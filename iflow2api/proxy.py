@@ -21,7 +21,7 @@ def generate_signature(user_agent: str, session_id: str, timestamp: int, api_key
     签名算法来源于 iflow-cli 源码:
     - 算法: HMAC-SHA256
     - 密钥: apiKey
-    - 签名内容: `{user-agent}:{session-id}:{timestamp}`
+    - 签名内容: `{user_agent}:{session_id}:{timestamp}`
     - 输出: 十六进制字符串
     """
     if not api_key:
@@ -116,6 +116,8 @@ class IFlowProxy:
         # https://github.com/iflow-ai/iflow-cli/blob/main/src/models.ts
         # 2026.2.15 更新
         models = [
+            {"id": "glm-4.6", "name": "GLM-4.6", "description": "智谱 GLM-4.6"},
+            {"id": "glm-4.7", "name": "GLM-4.7", "description": "智谱 GLM-4.7"},
             {"id": "glm-5", "name": "GLM-5", "description": "智谱 GLM-5 (推荐)"},
             {
                 "id": "iFlow-ROME-30BA3B",
@@ -133,19 +135,24 @@ class IFlowProxy:
                 "description": "通义千问 Qwen3 Coder Plus",
             },
             {
+                "id": "kimi-k2",
+                "name": "Kimi-K2",
+                "description": "Moonshot Kimi K2",
+            },
+            {
                 "id": "kimi-k2-thinking",
                 "name": "Kimi-K2-Thinking",
                 "description": "Moonshot Kimi K2 思考模型",
             },
             {
-                "id": "minimax-m2.5",
-                "name": "MiniMax-M2.5",
-                "description": "MiniMax M2.5",
-            },
-            {
                 "id": "kimi-k2.5",
                 "name": "Kimi-K2.5",
                 "description": "Moonshot Kimi K2.5",
+            },
+            {
+                "id": "minimax-m2.5",
+                "name": "MiniMax-M2.5",
+                "description": "MiniMax M2.5",
             },
         ]
 
@@ -279,4 +286,3 @@ class IFlowProxy:
 
         response.raise_for_status()
         return response.json()
-

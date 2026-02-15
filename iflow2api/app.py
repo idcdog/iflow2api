@@ -187,8 +187,10 @@ def get_mapped_model(anthropic_model: str) -> str:
     """
     # iFlow 已知模型 ID
     known_iflow_models = {
-        "glm-5", "iFlow-ROME-30BA3B", "deepseek-v3.2-chat",
-        "qwen3-coder-plus", "kimi-k2-thinking", "minimax-m2.5", "kimi-k2.5",
+        "glm-4.6", "glm-4.7", "glm-5",
+        "iFlow-ROME-30BA3B", "deepseek-v3.2-chat",
+        "qwen3-coder-plus", "kimi-k2", "kimi-k2-thinking", "kimi-k2.5",
+        "minimax-m2.5",
     }
     if anthropic_model in known_iflow_models:
         return anthropic_model
