@@ -35,6 +35,9 @@ class AppSettings(BaseModel):
     minimize_to_tray: bool = True  # 关闭时最小化到托盘
     auto_run_server: bool = False  # 启动时自动运行服务
 
+    # 主题设置
+    theme_mode: str = "system"  # 主题模式: light, dark, system
+
 
 def get_config_dir() -> Path:
     """获取应用配置目录"""
@@ -82,6 +85,8 @@ def load_settings() -> AppSettings:
                     settings.minimize_to_tray = data["minimize_to_tray"]
                 if "auto_run_server" in data:
                     settings.auto_run_server = data["auto_run_server"]
+                if "theme_mode" in data:
+                    settings.theme_mode = data["theme_mode"]
         except Exception:
             pass
 
@@ -106,6 +111,7 @@ def save_settings(settings: AppSettings) -> None:
         "start_minimized": settings.start_minimized,
         "minimize_to_tray": settings.minimize_to_tray,
         "auto_run_server": settings.auto_run_server,
+        "theme_mode": settings.theme_mode,
     }
 
     config_path = get_config_path()

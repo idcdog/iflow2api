@@ -376,10 +376,44 @@ async def lifespan(app: FastAPI):
 # 创建 FastAPI 应用
 app = FastAPI(
     title="iflow2api",
-    description="将 iFlow CLI 的 AI 服务暴露为 OpenAI 兼容 API",
-    version="0.1.0",
+    description="""
+## iflow2api - iFlow CLI AI 服务代理
+
+将 iFlow CLI 的 AI 服务暴露为 OpenAI 兼容 API，支持多种 AI 模型。
+
+### 功能特性
+
+- **OpenAI 兼容 API**: 支持 `/v1/chat/completions` 端点
+- **Anthropic 兼容 API**: 支持 `/v1/messages` 端点（Claude Code 兼容）
+- **多模型支持**: GLM-4.6/4.7/5、DeepSeek-V3.2、Qwen3-Coder-Plus、Kimi-K2/K2.5、MiniMax-M2.5
+- **流式响应**: 支持 SSE 流式输出
+- **OAuth 认证**: 支持 iFlow OAuth 登录
+
+### 支持的模型
+
+| 模型 ID | 名称 | 说明 |
+|---------|------|------|
+| `glm-4.6` | GLM-4.6 | 智谱 GLM-4.6 |
+| `glm-4.7` | GLM-4.7 | 智谱 GLM-4.7 |
+| `glm-5` | GLM-5 | 智谱 GLM-5 (推荐) |
+| `deepseek-v3.2-chat` | DeepSeek-V3.2 | DeepSeek V3.2 对话模型 |
+| `qwen3-coder-plus` | Qwen3-Coder-Plus | 通义千问 Qwen3 Coder |
+| `kimi-k2` | Kimi-K2 | Moonshot Kimi K2 |
+| `kimi-k2.5` | Kimi-K2.5 | Moonshot Kimi K2.5 |
+| `minimax-m2.5` | MiniMax-M2.5 | MiniMax M2.5 |
+
+### 使用方式
+
+1. 确保已安装并登录 iFlow CLI: `npm install -g @iflow-ai/iflow-cli && iflow login`
+2. 启动服务: `iflow2api` 或通过 GUI 启动
+3. 配置客户端使用 `http://localhost:28000/v1` 作为 API 端点
+""",
+    version="0.3.0",
     lifespan=lifespan,
-    redirect_slashes=True, # 自动处理末尾斜杠
+    redirect_slashes=True,  # 自动处理末尾斜杠
+    docs_url="/docs",  # Swagger UI
+    redoc_url="/redoc",  # ReDoc
+    openapi_url="/openapi.json",  # OpenAPI schema
 )
 
 # 添加 CORS 中间件
@@ -415,11 +449,13 @@ async def log_requests(request: Request, call_next):
 # ============ 请求/响应模型 ============
 
 class ChatMessage(BaseModel):
+    """聊天消息"""
     role: str
     content: Any  # 可以是字符串或内容块列表
 
 
 class ChatCompletionRequest(BaseModel):
+    """Chat Completions API 请求体"""
     model: str
     messages: list[ChatMessage]
     temperature: Optional[float] = None
@@ -435,24 +471,70 @@ class ChatCompletionRequest(BaseModel):
         extra = "allow"  # 允许额外字段
 
 
+# ============ 示例请求 ============
+
+OPENAI_CHAT_EXAMPLE = {
+    "model": "glm-5",
+    "messages": [
+        {"role": "system", "content": "你是一个有帮助的助手。"},
+        {"role": "user", "content": "你好，请介绍一下你自己。"}
+    ],
+    "temperature": 0.7,
+    "max_tokens": 1024,
+    "stream": False
+}
+
+OPENAI_CHAT_STREAM_EXAMPLE = {
+    "model": "glm-5",
+    "messages": [
+        {"role": "user", "content": "写一首关于春天的诗。"}
+    ],
+    "stream": True
+}
+
+ANTHROPIC_MESSAGES_EXAMPLE = {
+    "model": "claude-sonnet-4-5-20250929",
+    "max_tokens": 1024,
+    "system": "你是一个有帮助的助手。",
+    "messages": [
+        {"role": "user", "content": "你好，请介绍一下你自己。"}
+    ]
+}
+
+
 # ============ API 端点 ============
 
-@app.get("/")
+@app.get(
+    "/",
+    summary="根路径",
+    description="返回服务基本信息和可用端点列表",
+    response_description="服务信息",
+    tags=["基本信息"],
+)
 async def root():
     """根路径"""
     return {
         "service": "iflow2api",
-        "version": "0.1.0",
+        "version": "0.3.0",
         "description": "iFlow CLI AI 服务 → OpenAI 兼容 API",
         "endpoints": {
             "models": "/v1/models",
             "chat_completions": "/v1/chat/completions",
+            "messages": "/v1/messages",
             "health": "/health",
+            "docs": "/docs",
+            "redoc": "/redoc",
         },
     }
 
 
-@app.get("/health")
+@app.get(
+    "/health",
+    summary="健康检查",
+    description="检查服务健康状态和 iFlow 登录状态",
+    response_description="健康状态",
+    tags=["基本信息"],
+)
 async def health():
     """健康检查"""
     is_logged_in = check_iflow_login()
@@ -462,7 +544,13 @@ async def health():
     }
 
 
-@app.get("/v1/models")
+@app.get(
+    "/v1/models",
+    summary="获取模型列表",
+    description="获取所有可用的 AI 模型列表",
+    response_description="模型列表",
+    tags=["模型"],
+)
 async def list_models():
     """获取可用模型列表"""
     try:
@@ -487,7 +575,37 @@ def create_error_response(status_code: int, message: str, error_type: str = "api
     )
 
 
-@app.post("/v1/chat/completions")
+@app.post(
+    "/v1/chat/completions",
+    summary="Chat Completions API (OpenAI 格式)",
+    description="""
+OpenAI 兼容的 Chat Completions API 端点。
+
+支持流式和非流式响应。使用 `stream: true` 启用流式输出。
+
+**支持的模型**: glm-4.6, glm-4.7, glm-5, deepseek-v3.2-chat, qwen3-coder-plus, kimi-k2, kimi-k2.5, minimax-m2.5
+""",
+    response_description="Chat completion 响应",
+    tags=["Chat"],
+    openapi_extra={
+        "requestBody": {
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "basic": {
+                            "summary": "基本对话",
+                            "value": OPENAI_CHAT_EXAMPLE,
+                        },
+                        "streaming": {
+                            "summary": "流式输出",
+                            "value": OPENAI_CHAT_STREAM_EXAMPLE,
+                        },
+                    }
+                }
+            }
+        }
+    },
+)
 @app.post("/v1/chat/completions/")
 @app.post("/chat/completions")
 @app.post("/chat/completions/")
@@ -593,7 +711,33 @@ async def chat_completions_openai(request: Request):
         return create_error_response(status_code, error_msg)
 
 
-@app.post("/v1/messages")
+@app.post(
+    "/v1/messages",
+    summary="Messages API (Anthropic 格式)",
+    description="""
+Anthropic 兼容的 Messages API 端点，支持 Claude Code 等客户端。
+
+请求格式与 Anthropic API 兼容，会自动转换为 OpenAI 格式并映射到 iFlow 模型。
+
+**模型映射**: Claude 系列模型会自动映射到 glm-5，也可直接指定 iFlow 模型 ID。
+""",
+    response_description="Messages 响应",
+    tags=["Chat"],
+    openapi_extra={
+        "requestBody": {
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "basic": {
+                            "summary": "基本对话",
+                            "value": ANTHROPIC_MESSAGES_EXAMPLE,
+                        },
+                    }
+                }
+            }
+        }
+    },
+)
 @app.post("/v1/messages/")
 @app.post("/messages")
 @app.post("/messages/")

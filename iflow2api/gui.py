@@ -44,10 +44,6 @@ class IFlow2ApiApp:
         self.port_field: Optional[ft.TextField] = None
         self.api_key_field: Optional[ft.TextField] = None
         self.base_url_field: Optional[ft.TextField] = None
-        self.auto_start_checkbox: Optional[ft.Checkbox] = None
-        self.start_minimized_checkbox: Optional[ft.Checkbox] = None
-        self.minimize_to_tray_checkbox: Optional[ft.Checkbox] = None
-        self.auto_run_checkbox: Optional[ft.Checkbox] = None
         self.start_btn: Optional[ft.Button] = None
         self.stop_btn: Optional[ft.Button] = None
         self.log_list: Optional[ft.ListView] = None
@@ -68,14 +64,28 @@ class IFlow2ApiApp:
         """设置页面"""
         self.page.title = "iflow2api"
         self.page.window.width = 500
-        self.page.window.height = 980
+        self.page.window.height = 800
         self.page.window.resizable = True
         self.page.window.min_width = 400
         self.page.window.min_height = 500
         self.page.padding = 20
 
+        # 设置主题
+        self._apply_theme()
+
         # 窗口关闭事件
         self.page.window.on_event = self._on_window_event
+
+    def _apply_theme(self):
+        """应用主题设置"""
+        theme_mode = self.settings.theme_mode
+        if theme_mode == "system":
+            # 跟随系统主题
+            self.page.theme_mode = ft.ThemeMode.SYSTEM
+        elif theme_mode == "dark":
+            self.page.theme_mode = ft.ThemeMode.DARK
+        else:
+            self.page.theme_mode = ft.ThemeMode.LIGHT
 
     def _on_window_event(self, e):
         """窗口事件处理"""
@@ -219,39 +229,21 @@ class IFlow2ApiApp:
             border_radius=8,
         )
 
-        # 应用设置
-        self.auto_start_checkbox = ft.Checkbox(
-            label="开机自启动",
-            value=get_auto_start(),
-            on_change=self._on_auto_start_change,
-        )
-        self.start_minimized_checkbox = ft.Checkbox(
-            label="启动时最小化",
-            value=self.settings.start_minimized,
-        )
-        self.minimize_to_tray_checkbox = ft.Checkbox(
-            label="关闭时最小化到托盘",
-            value=self.settings.minimize_to_tray,
-            disabled=not is_tray_available(),
-        )
-        self.auto_run_checkbox = ft.Checkbox(
-            label="启动时自动运行服务",
-            value=self.settings.auto_run_server,
+        # 应用设置按钮
+        settings_btn = ft.Button(
+            "应用设置",
+            icon=ft.Icons.SETTINGS,
+            on_click=self._show_settings_dialog,
+            style=ft.ButtonStyle(
+                bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+            ),
         )
 
-        app_settings = ft.Container(
-            content=ft.Column(
-                [
-                    ft.Text("应用设置", weight=ft.FontWeight.BOLD),
-                    self.auto_start_checkbox,
-                    self.start_minimized_checkbox,
-                    self.minimize_to_tray_checkbox,
-                    self.auto_run_checkbox,
-                ]
+        app_settings_row = ft.Container(
+            content=ft.Row(
+                [settings_btn],
+                alignment=ft.MainAxisAlignment.START,
             ),
-            padding=15,
-            border=ft.Border.all(1, ft.Colors.OUTLINE),
-            border_radius=8,
         )
 
         # 操作按钮
@@ -308,7 +300,7 @@ class IFlow2ApiApp:
                     status_row,
                     server_config,
                     iflow_config,
-                    app_settings,
+                    app_settings_row,
                     buttons_row,
                     log_container,
                 ],
@@ -419,6 +411,104 @@ class IFlow2ApiApp:
         # 显示提示
         self._show_snack_bar("配置已保存")
 
+    def _show_settings_dialog(self, e):
+        """显示应用设置对话框"""
+        # 创建对话框中的设置组件
+        auto_start_checkbox = ft.Checkbox(
+            label="开机自启动",
+            value=get_auto_start(),
+        )
+        start_minimized_checkbox = ft.Checkbox(
+            label="启动时最小化",
+            value=self.settings.start_minimized,
+        )
+        minimize_to_tray_checkbox = ft.Checkbox(
+            label="关闭时最小化到托盘",
+            value=self.settings.minimize_to_tray,
+            disabled=not is_tray_available(),
+        )
+        auto_run_checkbox = ft.Checkbox(
+            label="启动时自动运行服务",
+            value=self.settings.auto_run_server,
+        )
+        theme_dropdown = ft.Dropdown(
+            label="主题模式",
+            options=[
+                ft.dropdown.Option("system", "跟随系统"),
+                ft.dropdown.Option("light", "亮色主题"),
+                ft.dropdown.Option("dark", "暗色主题"),
+            ],
+            value=self.settings.theme_mode,
+            width=200,
+        )
+
+        def on_save(e):
+            """保存设置"""
+            # 更新开机自启动
+            if auto_start_checkbox.value != get_auto_start():
+                success = set_auto_start(auto_start_checkbox.value)
+                if not success:
+                    self._add_log("设置开机自启动失败")
+            
+            # 更新其他设置
+            self.settings.start_minimized = start_minimized_checkbox.value
+            self.settings.minimize_to_tray = minimize_to_tray_checkbox.value
+            self.settings.auto_run_server = auto_run_checkbox.value
+            self.settings.theme_mode = theme_dropdown.value or "system"
+            
+            # 应用主题
+            self._apply_theme()
+            
+            # 保存设置到文件
+            save_settings(self.settings)
+            
+            self._add_log("应用设置已保存")
+            self._show_snack_bar("应用设置已保存")
+            
+            # 关闭对话框
+            if hasattr(self.page, "close"):
+                self.page.close(dlg)
+            else:
+                dlg.open = False
+                self.page.update()
+
+        def on_cancel(e):
+            """取消"""
+            if hasattr(self.page, "close"):
+                self.page.close(dlg)
+            else:
+                dlg.open = False
+                self.page.update()
+
+        dlg = ft.AlertDialog(
+            title=ft.Text("应用设置"),
+            content=ft.Column(
+                [
+                    auto_start_checkbox,
+                    start_minimized_checkbox,
+                    minimize_to_tray_checkbox,
+                    auto_run_checkbox,
+                    ft.Divider(),
+                    ft.Row([theme_dropdown], alignment=ft.MainAxisAlignment.START),
+                ],
+                tight=True,
+                spacing=10,
+            ),
+            actions=[
+                ft.TextButton("取消", on_click=on_cancel),
+                ft.TextButton("保存", on_click=on_save),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+
+        # 打开对话框
+        if hasattr(self.page, "open"):
+            self.page.open(dlg)
+        else:
+            dlg.open = True
+            self.page.add(dlg)
+            self.page.update()
+
     def _update_settings_from_ui(self):
         """从 UI 更新配置"""
         self.settings.host = self.host_field.value or "0.0.0.0"
@@ -428,9 +518,6 @@ class IFlow2ApiApp:
             self.settings.port = 28000
         self.settings.api_key = self.api_key_field.value or ""
         self.settings.base_url = self.base_url_field.value or "https://apis.iflow.cn/v1"
-        self.settings.start_minimized = self.start_minimized_checkbox.value
-        self.settings.minimize_to_tray = self.minimize_to_tray_checkbox.value
-        self.settings.auto_run_server = self.auto_run_checkbox.value
 
     def _import_from_cli(self, e):
         """从 iFlow CLI 导入配置"""
@@ -444,16 +531,6 @@ class IFlow2ApiApp:
         else:
             self._add_log("无法导入 iFlow CLI 配置")
             self._show_snack_bar("无法导入配置，请确保已运行 iflow 并完成登录", color=ft.Colors.RED)
-
-    def _on_auto_start_change(self, e):
-        """开机自启动设置变化"""
-        success = set_auto_start(e.control.value)
-        if success:
-            self._add_log(f"开机自启动已{'启用' if e.control.value else '禁用'}")
-        else:
-            e.control.value = not e.control.value
-            self.page.update()
-            self._add_log("设置开机自启动失败")
 
     def _login_with_iflow_oauth(self, e):
         """使用 iFlow OAuth 登录"""
