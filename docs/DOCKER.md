@@ -8,7 +8,7 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/your-repo/iflow2api.git
+git clone https://github.com/iflow-ai/iflow2api.git
 cd iflow2api
 
 # 启动服务

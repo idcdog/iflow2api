@@ -39,3 +39,8 @@ packages = ["iflow2api"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+
+[dependency-groups]
+dev = [
+    "cryptography>=46.0.5",
+]

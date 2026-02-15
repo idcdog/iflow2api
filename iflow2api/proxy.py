@@ -187,11 +187,14 @@ class IFlowProxy:
         iFlow API 没有公开的 /models 端点，因此返回已知的模型列表。
         模型列表来源于 iflow-cli 源码中的 SUPPORTED_MODELS。
         使用 iFlow-Cli User-Agent 可以解锁这些高级模型。
+        
+        注意：所有模型都支持图像输入，由上游 API 决定如何处理。
         """
         # iFlow CLI 支持的模型列表 (来源: iflow-cli SUPPORTED_MODELS)
         # https://github.com/iflow-ai/iflow-cli/blob/main/src/models.ts
         # 2026.2.15 更新
         models = [
+            # 文本模型
             {"id": "glm-4.6", "name": "GLM-4.6", "description": "智谱 GLM-4.6"},
             {"id": "glm-4.7", "name": "GLM-4.7", "description": "智谱 GLM-4.7"},
             {"id": "glm-5", "name": "GLM-5", "description": "智谱 GLM-5 (推荐)"},
@@ -230,6 +233,19 @@ class IFlowProxy:
                 "name": "MiniMax-M2.5",
                 "description": "MiniMax M2.5",
             },
+            # 视觉模型（推荐用于图像处理）
+            {"id": "glm-4v", "name": "GLM-4V", "description": "智谱 GLM-4V 视觉模型"},
+            {"id": "glm-4v-plus", "name": "GLM-4V-Plus", "description": "智谱 GLM-4V-Plus 视觉模型"},
+            {"id": "glm-4v-flash", "name": "GLM-4V-Flash", "description": "智谱 GLM-4V-Flash 视觉模型 (免费)"},
+            {"id": "glm-4.5v", "name": "GLM-4.5V", "description": "智谱 GLM-4.5V 视觉模型"},
+            {"id": "glm-4.6v", "name": "GLM-4.6V", "description": "智谱 GLM-4.6V 视觉模型"},
+            {"id": "moonshot-v1-8k-vision", "name": "Kimi Vision 8K", "description": "Kimi 视觉模型 8K"},
+            {"id": "moonshot-v1-32k-vision", "name": "Kimi Vision 32K", "description": "Kimi 视觉模型 32K"},
+            {"id": "moonshot-v1-128k-vision", "name": "Kimi Vision 128K", "description": "Kimi 视觉模型 128K"},
+            {"id": "qwen-vl-plus", "name": "Qwen-VL-Plus", "description": "通义千问 VL Plus 视觉模型"},
+            {"id": "qwen-vl-max", "name": "Qwen-VL-Max", "description": "通义千问 VL Max 视觉模型"},
+            {"id": "qwen2.5-vl", "name": "Qwen2.5-VL", "description": "通义千问 Qwen2.5 VL 视觉模型"},
+            {"id": "qwen3-vl", "name": "Qwen3-VL", "description": "通义千问 Qwen3 VL 视觉模型"},
         ]
 
         import time
@@ -237,6 +253,7 @@ class IFlowProxy:
         current_time = int(time.time())
 
         # 返回 OpenAI 兼容格式
+        # 所有模型都标记为支持视觉，由上游 API 决定如何处理
         return {
             "object": "list",
             "data": [

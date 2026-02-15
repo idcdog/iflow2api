@@ -15,14 +15,15 @@ RUN pip install uv
 # 设置工作目录
 WORKDIR /app
 
-# 复制依赖文件
-COPY pyproject.toml uv.lock ./
+# 复制依赖文件和 README（pyproject.toml 需要）
+COPY pyproject.toml uv.lock README.md ./
 
 # 使用 uv 安装依赖到虚拟环境
 RUN uv venv /opt/venv
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
-RUN uv pip install --no-cache -r uv.lock
+# 使用 uv sync 从 lock 文件安装依赖，--active 使用已存在的虚拟环境
+RUN uv sync --frozen --no-dev --active
 
 # 阶段2: 运行阶段
 FROM python:3.12-slim
