@@ -100,7 +100,7 @@ class IFlow2ApiApp:
         self.port_field = ft.TextField(
             label="监听端口",
             value=str(self.settings.port),
-            hint_text="8000",
+            hint_text="28000",
             keyboard_type=ft.KeyboardType.NUMBER,
             width=120,
         )
@@ -255,6 +255,21 @@ class IFlow2ApiApp:
 
         self._add_log("应用已启动")
 
+    def _show_snack_bar(self, message: str, color: str = ft.Colors.GREEN):
+        """显示 SnackBar 提示"""
+        sb = ft.SnackBar(content=ft.Text(message), bgcolor=color)
+        if hasattr(self.page, "open"):
+            try:
+                self.page.open(sb)
+            except Exception:
+                self.page.snack_bar = sb
+                sb.open = True
+                self.page.update()
+        else:
+            self.page.snack_bar = sb
+            sb.open = True
+            self.page.update()
+
     def _add_log(self, message: str):
         """添加日志"""
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -327,17 +342,15 @@ class IFlow2ApiApp:
         self._add_log("配置已保存")
 
         # 显示提示
-        self.page.open(
-            ft.SnackBar(content=ft.Text("配置已保存"), bgcolor=ft.Colors.GREEN)
-        )
+        self._show_snack_bar("配置已保存")
 
     def _update_settings_from_ui(self):
         """从 UI 更新配置"""
         self.settings.host = self.host_field.value or "0.0.0.0"
         try:
-            self.settings.port = int(self.port_field.value or "8000")
+            self.settings.port = int(self.port_field.value or "28000")
         except ValueError:
-            self.settings.port = 8000
+            self.settings.port = 28000
         self.settings.api_key = self.api_key_field.value or ""
         self.settings.base_url = self.base_url_field.value or "https://apis.iflow.cn/v1"
         self.settings.start_minimized = self.start_minimized_checkbox.value
@@ -351,19 +364,10 @@ class IFlow2ApiApp:
             self.base_url_field.value = config.base_url
             self.page.update()
             self._add_log("已从 iFlow CLI 导入配置")
-            self.page.open(
-                ft.SnackBar(
-                    content=ft.Text("已从 iFlow CLI 导入配置"), bgcolor=ft.Colors.GREEN
-                )
-            )
+            self._show_snack_bar("已从 iFlow CLI 导入配置")
         else:
             self._add_log("无法导入 iFlow CLI 配置")
-            self.page.open(
-                ft.SnackBar(
-                    content=ft.Text("无法导入配置，请确保已运行 iflow 并完成登录"),
-                    bgcolor=ft.Colors.RED,
-                )
-            )
+            self._show_snack_bar("无法导入配置，请确保已运行 iflow 并完成登录", color=ft.Colors.RED)
 
     def _on_auto_start_change(self, e):
         """开机自启动设置变化"""
@@ -390,11 +394,7 @@ class IFlow2ApiApp:
             self.page.update()
 
             # 显示成功提示
-            self.page.open(
-                ft.SnackBar(
-                    content=ft.Text("登录成功！配置已自动更新"), bgcolor=ft.Colors.GREEN
-                )
-            )
+            self._show_snack_bar("登录成功！配置已自动更新")
 
         handler = OAuthLoginHandler(self._add_log, success_callback=on_login_success)
         handler.start_login()

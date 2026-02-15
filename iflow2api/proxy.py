@@ -59,16 +59,22 @@ class IFlowProxy:
         - conversation-id: 对话ID
         - x-iflow-signature: HMAC-SHA256 签名
         - x-iflow-timestamp: 时间戳(毫秒)
+        - installation-id: 安装ID
         """
         timestamp = int(time.time() * 1000)  # 毫秒时间戳
         
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.config.api_key}",
-            "user-agent": IFLOW_CLI_USER_AGENT,
+            "User-Agent": IFLOW_CLI_USER_AGENT,
             "session-id": self._session_id,
             "conversation-id": self._conversation_id,
+            "Accept": "application/json",
         }
+        
+        # 添加 installation-id
+        if self.config.installation_id:
+            headers["installation-id"] = self.config.installation_id
         
         # 添加签名
         signature = generate_signature(
@@ -168,20 +174,42 @@ class IFlowProxy:
         stream: bool = False,
     ) -> dict | AsyncIterator[bytes]:
         """
-                调用 chat completions API
+        调用 chat completions API
 
-                Args:
-                    request_body: 请求体
-                    stream: 是否流式响应
+        Args:
+            request_body: 请求体
+            stream: 是否流式响应
 
         Returns:
-                    非流式: 返回完整响应 dict
-                    流式: 返回字节流迭代器
+            非流式: 返回完整响应 dict
+            流式: 返回字节流迭代器
         """
         client = await self._get_client()
 
         if stream:
-            return self._stream_chat_completions(client, request_body)
+            # 对于流式请求，我们需要在返回迭代器之前检查状态码
+            # 使用上下文管理器手动控制响应
+            response = await client.post(
+                f"{self.base_url}/chat/completions",
+                headers=self._get_headers(),
+                json=request_body,
+                timeout=httpx.Timeout(300.0, connect=10.0),
+            )
+            try:
+                response.raise_for_status()
+                # 如果成功，返回一个生成器来迭代内容
+                # 注意：我们需要确保 response 在迭代完之前不被关闭
+                async def content_generator():
+                    try:
+                        async for chunk in response.aiter_bytes():
+                            yield chunk
+                    finally:
+                        await response.aclose()
+                
+                return content_generator()
+            except Exception:
+                await response.aclose()
+                raise
         else:
             response = await client.post(
                 f"{self.base_url}/chat/completions",
@@ -200,22 +228,6 @@ class IFlowProxy:
                 }
 
             return result
-
-    async def _stream_chat_completions(
-        self,
-        client: httpx.AsyncClient,
-        request_body: dict,
-    ) -> AsyncIterator[bytes]:
-        """流式调用 chat completions API"""
-        async with client.stream(
-            "POST",
-            f"{self.base_url}/chat/completions",
-            headers=self._get_headers(),
-            json=request_body,
-        ) as response:
-            response.raise_for_status()
-            async for chunk in response.aiter_bytes():
-                yield chunk
 
     async def proxy_request(
         self,
@@ -240,7 +252,21 @@ class IFlowProxy:
         url = f"{self.base_url}{path}"
 
         if stream and method.upper() == "POST":
-            return self._stream_request(client, url, body)
+            response = await client.post(
+                url, headers=self._get_headers(), json=body, timeout=httpx.Timeout(300.0, connect=10.0)
+            )
+            try:
+                response.raise_for_status()
+                async def content_generator():
+                    try:
+                        async for chunk in response.aiter_bytes():
+                            yield chunk
+                    finally:
+                        await response.aclose()
+                return content_generator()
+            except Exception:
+                await response.aclose()
+                raise
 
         if method.upper() == "GET":
             response = await client.get(url, headers=self._get_headers())
@@ -252,19 +278,3 @@ class IFlowProxy:
         response.raise_for_status()
         return response.json()
 
-    async def _stream_request(
-        self,
-        client: httpx.AsyncClient,
-        url: str,
-        body: Optional[dict],
-    ) -> AsyncIterator[bytes]:
-        """流式请求"""
-        async with client.stream(
-            "POST",
-            url,
-            headers=self._get_headers(),
-            json=body,
-        ) as response:
-            response.raise_for_status()
-            async for chunk in response.aiter_bytes():
-                yield chunk

@@ -11,11 +11,11 @@ from .config import load_iflow_config, save_iflow_config, IFlowConfig
 
 
 class AppSettings(BaseModel):
-    """应用配置"""
+    """应用配置修"""
 
     # 服务器配置
     host: str = "0.0.0.0"
-    port: int = 8000
+    port: int = 28000
 
     # iFlow 配置 (从 ~/.iflow/settings.json 读取)
     api_key: str = ""

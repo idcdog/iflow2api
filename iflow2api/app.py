@@ -11,8 +11,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from .config import load_iflow_config, check_iflow_login, IFlowConfig
+from .config import load_iflow_config, check_iflow_login, IFlowConfig, save_iflow_config
 from .proxy import IFlowProxy
+from .token_refresher import OAuthTokenRefresher
 
 
 # ============ Anthropic 格式转换函数 ============
@@ -175,6 +176,7 @@ def extract_content_from_delta(delta: dict) -> str:
 # 全局代理实例
 _proxy: Optional[IFlowProxy] = None
 _config: Optional[IFlowConfig] = None
+_refresher: Optional[OAuthTokenRefresher] = None
 
 
 def get_proxy() -> IFlowProxy:
@@ -186,9 +188,29 @@ def get_proxy() -> IFlowProxy:
     return _proxy
 
 
+def update_proxy_token(token_data: dict):
+    """Token 刷新回调，同步更新内存中的代理配置并保存"""
+    global _proxy, _config
+    if _proxy and _config:
+        print(f"[iflow2api] 检测到 Token 刷新，更新代理配置")
+        _config.api_key = token_data["access_token"]
+        _config.oauth_access_token = token_data["access_token"]
+        
+        # 更新其他 token 相关字段
+        if "refresh_token" in token_data:
+            _config.oauth_refresh_token = token_data["refresh_token"]
+        if "expires_at" in token_data:
+            _config.oauth_expires_at = token_data["expires_at"]
+        
+        # 保存到配置文件
+        save_iflow_config(_config)
+        print(f"[iflow2api] Token 已保存到配置文件")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
+    global _refresher, _proxy
     # 启动时检查配置
     try:
         config = load_iflow_config()
@@ -197,6 +219,13 @@ async def lifespan(app: FastAPI):
         print(f"[iflow2api] API Key: {config.api_key[:10]}...")
         if config.model_name:
             print(f"[iflow2api] 默认模型: {config.model_name}")
+            
+        # 启动 Token 刷新任务
+        _refresher = OAuthTokenRefresher()
+        _refresher.set_refresh_callback(update_proxy_token)
+        _refresher.start()
+        print(f"[iflow2api] 已启动 Token 自动刷新任务")
+        
     except FileNotFoundError as e:
         print(f"[错误] {e}", file=sys.stderr)
         print("[提示] 请先运行 'iflow' 命令并完成登录", file=sys.stderr)
@@ -208,7 +237,10 @@ async def lifespan(app: FastAPI):
     yield
 
     # 关闭时清理
-    global _proxy
+    if _refresher:
+        _refresher.stop()
+        _refresher = None
+        
     if _proxy:
         await _proxy.close()
         _proxy = None
@@ -313,6 +345,21 @@ async def list_models():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def create_error_response(status_code: int, message: str, error_type: str = "api_error") -> JSONResponse:
+    """创建 OpenAI 兼容的错误响应"""
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": {
+                "message": message,
+                "type": error_type,
+                "param": None,
+                "code": str(status_code)
+            }
+        }
+    )
+
+
 @app.post("/v1/chat/completions")
 @app.post("/v1/chat/completions/")
 @app.post("/chat/completions")
@@ -321,42 +368,61 @@ async def list_models():
 @app.post("/api/v1/chat/completions/")
 async def chat_completions_openai(request: Request):
     """Chat Completions API - OpenAI 格式"""
+    proxy = get_proxy()
     try:
         body_bytes = await request.body()
         body = json.loads(body_bytes.decode("utf-8"))
         stream = body.get("stream", False)
 
-        proxy = get_proxy()
-
         if stream:
-            async def generate():
-                async for chunk in await proxy.chat_completions(body, stream=True):
-                    yield chunk
-
-            return StreamingResponse(
-                generate(),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no",
-                },
-            )
+            # 获取流式迭代器
+            try:
+                # chat_completions 是 async def，返回一个 AsyncIterator
+                stream_gen = await proxy.chat_completions(body, stream=True)
+                
+                async def generate():
+                    try:
+                        async for chunk in stream_gen:
+                            yield chunk
+                    except Exception as e:
+                        # 传输过程中的错误
+                        print(f"[iflow2api] Streaming error: {e}")
+                
+                return StreamingResponse(
+                    generate(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
+                    },
+                )
+            except Exception as e:
+                error_msg = str(e)
+                if hasattr(e, "response"):
+                    try:
+                        error_data = e.response.json()
+                        error_msg = error_data.get("msg", error_msg)
+                    except Exception:
+                        pass
+                return create_error_response(500, error_msg)
         else:
             result = await proxy.chat_completions(body, stream=False)
             return JSONResponse(content=result)
 
     except json.JSONDecodeError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+        return create_error_response(400, f"Invalid JSON: {e}", "invalid_request_error")
     except Exception as e:
         error_msg = str(e)
+        status_code = 500
         if hasattr(e, "response"):
             try:
+                status_code = e.response.status_code
                 error_data = e.response.json()
                 error_msg = error_data.get("msg", error_msg)
             except Exception:
                 pass
-        raise HTTPException(status_code=500, detail=error_msg)
+        return create_error_response(status_code, error_msg)
 
 
 @app.post("/v1/messages")
@@ -502,6 +568,7 @@ async def list_models_compat():
 def main():
     """主入口"""
     import uvicorn
+    from .settings import load_settings
 
     # 检查是否已登录
     if not check_iflow_login():
@@ -509,16 +576,20 @@ def main():
         print("[提示] 请先运行 'iflow' 命令并完成登录", file=sys.stderr)
         sys.exit(1)
 
+    # 加载配置
+    settings = load_settings()
+
     print("=" * 50)
     print("  iflow2api - iFlow CLI AI 服务代理")
     print("=" * 50)
+    print(f"  监听地址: {settings.host}:{settings.port}")
     print()
 
     # 启动服务 - 直接传入 app 对象而非字符串，避免打包后导入失败
     uvicorn.run(
         app,
-        host="0.0.0.0",
-        port=8000,
+        host=settings.host,
+        port=settings.port,
         reload=False,
     )
 
