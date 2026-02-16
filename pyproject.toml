@@ -1,6 +1,6 @@
 [project]
 name = "iflow2api"
-version = "0.2.0"
+version = "1.0.0"
 description = "将 iFlow CLI 的 AI 服务暴露为 OpenAI 兼容 API"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -11,12 +11,16 @@ dependencies = [
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
     "flet>=0.25.0",
+    # P0: 系统托盘
+    "pystray>=0.19.0",
+    "Pillow>=10.0.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
+    "pytest-cov>=4.0.0",
 ]
 build = [
     "pyinstaller>=6.0.0",
@@ -35,3 +39,8 @@ packages = ["iflow2api"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+
+[dependency-groups]
+dev = [
+    "cryptography>=46.0.5",
+]

@@ -6,6 +6,8 @@
 
 ## 功能
 
+### 核心功能
+
 - 自动读取 iFlow 配置文件 (`~/.iflow/settings.json`)
 - 提供 OpenAI 兼容的 API 端点
 - 支持流式和非流式响应
@@ -13,6 +15,26 @@
 - 内置 GUI OAuth 登录界面，无需安装 iFlow CLI
 - 支持 OAuth token 自动刷新
 - 兼容 Anthropic Messages API，可直接对接 Claude Code
+
+### 桌面应用
+
+- **系统托盘** - 最小化到托盘、托盘菜单、状态显示
+- **跨平台开机自启动** - 支持 Windows (注册表) / macOS (LaunchAgent) / Linux (XDG autostart)
+- **暗色主题** - 支持亮色/暗色/跟随系统主题切换
+- **多语言支持** - 中英文界面切换
+
+### 管理功能
+
+- **Web 管理界面** - 独立管理页面，支持远程管理和登录认证
+- **多实例管理** - 支持多个服务实例、不同端口配置
+- **API 文档页面** - Swagger UI (`/docs`) + ReDoc (`/redoc`)
+- **速率限制** - 客户端请求限流、可配置限流规则
+
+### 高级功能
+
+- **Vision 支持** - 图像输入、Base64 编码、URL 支持
+- **配置加密** - 敏感配置加密存储
+- **Docker 支持** - 提供 Dockerfile 和 docker-compose.yml
 
 ## 支持的模型
 
@@ -105,6 +127,85 @@ python -c "import uvicorn; from iflow2api.app import app; uvicorn.run(app, host=
 | `/v1/messages`         | POST | Messages API (Anthropic 格式，Claude Code 兼容) |
 | `/models`              | GET  | 兼容端点 (不带 /v1 前缀)                        |
 | `/chat/completions`    | POST | 兼容端点 (不带 /v1 前缀)                        |
+| `/docs`                | GET  | Swagger UI API 文档                             |
+| `/redoc`                | GET  | ReDoc API 文档                                  |
+| `/admin`                | GET  | Web 管理界面                                    |
+
+## Docker 部署
+
+```bash
+# 使用 docker-compose
+docker-compose up -d
+
+# 或直接运行
+docker build -t iflow2api .
+docker run -d -p 28000:28000 -v ~/.iflow:/root/.iflow iflow2api
+```
+
+详细部署文档请参考 [Docker 部署指南](docs/DOCKER.md)。
+
+## Web 管理界面
+
+iflow2api 提供了独立的 Web 管理界面，支持远程管理：
+
+- 访问地址：`http://localhost:28000/admin`
+- 默认用户名/密码：`admin` / `admin`
+
+**功能特性**：
+- 实时服务状态监控
+- 多实例管理
+- 远程启动/停止服务
+- 配置管理
+
+## 高级配置
+
+### 思考链（Chain of Thought）设置
+
+某些模型（如 GLM-5、Kimi-K2-Thinking）支持思考链功能，会在响应中返回 `reasoning_content` 字段，展示模型的推理过程。
+
+**配置方式**
+
+编辑配置文件 `~/.iflow2api/config.json`：
+
+```json
+{
+  "preserve_reasoning_content": true
+}
+```
+
+**配置说明**
+
+| 配置值 | 行为 | 适用场景 |
+| ------ | ---- | -------- |
+| `false`（默认） | 将 `reasoning_content` 合并到 `content` 字段 | OpenAI 兼容客户端，只需最终回答 |
+| `true` | 保留 `reasoning_content` 字段，同时复制到 `content` | 需要分别显示思考过程和回答的客户端 |
+
+**响应格式对比**
+
+默认模式（`preserve_reasoning_content: false`）：
+```json
+{
+  "choices": [{
+    "message": {
+      "content": "思考过程...\n\n最终回答..."
+    }
+  }]
+}
+```
+
+保留模式（`preserve_reasoning_content: true`）：
+```json
+{
+  "choices": [{
+    "message": {
+      "content": "最终回答...",
+      "reasoning_content": "思考过程..."
+    }
+  }]
+}
+```
+
+> **注意**：即使开启保留模式，`content` 字段也会被填充，以确保只读取 `content` 的客户端能正常工作。
 
 ## 客户端配置示例
 

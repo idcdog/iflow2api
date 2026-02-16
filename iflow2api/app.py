@@ -8,12 +8,24 @@ from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .config import load_iflow_config, check_iflow_login, IFlowConfig, save_iflow_config
 from .proxy import IFlowProxy
 from .token_refresher import OAuthTokenRefresher
+from .ratelimit import RateLimitConfig, init_limiter, create_rate_limit_middleware, get_rate_limiter
+from .vision import (
+    is_vision_model,
+    supports_vision,
+    get_vision_model_info,
+    detect_image_content,
+    process_message_content,
+    get_vision_models_list,
+    get_max_images,
+    DEFAULT_VISION_MODEL,
+)
 
 
 # ============ Anthropic 格式转换函数 ============
@@ -192,21 +204,37 @@ def extract_content_from_delta(delta: dict) -> str:
 DEFAULT_IFLOW_MODEL = "glm-5"
 
 
-def get_mapped_model(anthropic_model: str) -> str:
+def get_mapped_model(anthropic_model: str, has_images: bool = False) -> str:
     """
     将 Anthropic/Claude 模型名映射为 iFlow 模型名。
     如果是已知的 iFlow 模型则原样返回，否则回退到默认模型。
+    
+    注意：所有模型都支持图像输入，由上游 API 决定如何处理。
+    
+    Args:
+        anthropic_model: 原始模型名
+        has_images: 请求是否包含图像（保留参数，用于日志）
+    
+    Returns:
+        映射后的模型名
     """
-    # iFlow 已知模型 ID
+    # iFlow 已知模型 ID（包括文本模型和视觉模型）
     known_iflow_models = {
+        # 文本模型
         "glm-4.6", "glm-4.7", "glm-5",
         "iFlow-ROME-30BA3B", "deepseek-v3.2-chat",
         "qwen3-coder-plus", "kimi-k2", "kimi-k2-thinking", "kimi-k2.5",
         "minimax-m2.5",
+        # 视觉模型
+        "glm-4v", "glm-4v-plus", "glm-4v-flash", "glm-4.5v", "glm-4.6v",
+        "moonshot-v1-8k-vision", "moonshot-v1-32k-vision", "moonshot-v1-128k-vision",
+        "qwen-vl-plus", "qwen-vl-max", "qwen2.5-vl", "qwen3-vl",
     }
+    
     if anthropic_model in known_iflow_models:
         return anthropic_model
-    # Claude 系列模型名回退到默认
+    
+    # Claude 系列模型名回退到默认模型
     print(f"[iflow2api] 模型映射: {anthropic_model} → {DEFAULT_IFLOW_MODEL}")
     return DEFAULT_IFLOW_MODEL
 
@@ -236,11 +264,24 @@ def anthropic_to_openai_request(body: dict) -> dict:
       ],
       "stream": true
     }
+    
+    支持图像输入（Vision）:
+    - Anthropic 格式: {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "..."}}
+    - OpenAI 格式: {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}
     """
     openai_body = {}
     
-    # 1. 模型映射
-    openai_body["model"] = get_mapped_model(body.get("model", DEFAULT_IFLOW_MODEL))
+    # 检测是否有图像内容
+    has_images = False
+    for msg in body.get("messages", []):
+        content = msg.get("content", "")
+        images = detect_image_content(content)
+        if images:
+            has_images = True
+            break
+    
+    # 1. 模型映射（考虑图像支持）
+    openai_body["model"] = get_mapped_model(body.get("model", DEFAULT_IFLOW_MODEL), has_images)
     
     # 2. 构建 messages（先处理 system）
     messages = []
@@ -256,32 +297,71 @@ def anthropic_to_openai_request(body: dict) -> dict:
         if system_text:
             messages.append({"role": "system", "content": system_text})
     
-    # 3. 转换 messages 中的 content
+    # 3. 转换 messages 中的 content（支持图像）
     for msg in body.get("messages", []):
         role = msg.get("role", "user")
         content = msg.get("content", "")
         
         if isinstance(content, list):
-            # Anthropic 内容块格式 → 提取纯文本
-            text_parts = []
-            for block in content:
-                if isinstance(block, dict):
-                    if block.get("type") == "text":
-                        text_parts.append(block.get("text", ""))
-                    elif block.get("type") == "tool_result":
-                        # 工具结果，提取内容
-                        tool_content = block.get("content", "")
-                        if isinstance(tool_content, list):
-                            for tc in tool_content:
-                                if isinstance(tc, dict) and tc.get("type") == "text":
-                                    text_parts.append(tc.get("text", ""))
-                        elif isinstance(tool_content, str):
-                            text_parts.append(tool_content)
-                elif isinstance(block, str):
-                    text_parts.append(block)
-            content = "\n".join(text_parts)
-        
-        messages.append({"role": role, "content": content})
+            # 检查是否有图像
+            images = detect_image_content(content)
+            
+            if images:
+                # 有图像，使用 OpenAI 多模态格式
+                # 提取文本部分
+                text_parts = []
+                for block in content:
+                    if isinstance(block, dict):
+                        if block.get("type") == "text":
+                            text_parts.append(block.get("text", ""))
+                        elif block.get("type") == "tool_result":
+                            # 工具结果，提取内容
+                            tool_content = block.get("content", "")
+                            if isinstance(tool_content, list):
+                                for tc in tool_content:
+                                    if isinstance(tc, dict) and tc.get("type") == "text":
+                                        text_parts.append(tc.get("text", ""))
+                            elif isinstance(tool_content, str):
+                                text_parts.append(tool_content)
+                    elif isinstance(block, str):
+                        text_parts.append(block)
+                
+                # 构建多模态内容
+                multimodal_content = []
+                
+                # 添加文本
+                if text_parts:
+                    combined_text = "\n".join(text_parts)
+                    if combined_text.strip():
+                        multimodal_content.append({"type": "text", "text": combined_text})
+                
+                # 添加图像（OpenAI 格式）
+                from .vision import convert_to_openai_format
+                multimodal_content.extend(convert_to_openai_format(images))
+                
+                messages.append({"role": role, "content": multimodal_content})
+            else:
+                # 无图像，提取纯文本
+                text_parts = []
+                for block in content:
+                    if isinstance(block, dict):
+                        if block.get("type") == "text":
+                            text_parts.append(block.get("text", ""))
+                        elif block.get("type") == "tool_result":
+                            # 工具结果，提取内容
+                            tool_content = block.get("content", "")
+                            if isinstance(tool_content, list):
+                                for tc in tool_content:
+                                    if isinstance(tc, dict) and tc.get("type") == "text":
+                                        text_parts.append(tc.get("text", ""))
+                            elif isinstance(tool_content, str):
+                                text_parts.append(tool_content)
+                    elif isinstance(block, str):
+                        text_parts.append(block)
+                content = "\n".join(text_parts)
+                messages.append({"role": role, "content": content})
+        else:
+            messages.append({"role": role, "content": content})
     
     openai_body["messages"] = messages
     
@@ -304,6 +384,7 @@ def anthropic_to_openai_request(body: dict) -> dict:
 _proxy: Optional[IFlowProxy] = None
 _config: Optional[IFlowConfig] = None
 _refresher: Optional[OAuthTokenRefresher] = None
+_rate_limiter = None
 
 
 def get_proxy() -> IFlowProxy:
@@ -313,6 +394,12 @@ def get_proxy() -> IFlowProxy:
         _config = load_iflow_config()
         _proxy = IFlowProxy(_config)
     return _proxy
+
+
+def get_rate_limiter():
+    """获取速率限制器实例"""
+    global _rate_limiter
+    return _rate_limiter
 
 
 def update_proxy_token(token_data: dict):
@@ -337,7 +424,7 @@ def update_proxy_token(token_data: dict):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    global _refresher, _proxy
+    global _refresher, _proxy, _rate_limiter
     # 启动时检查配置
     try:
         config = load_iflow_config()
@@ -352,6 +439,21 @@ async def lifespan(app: FastAPI):
         _refresher.set_refresh_callback(update_proxy_token)
         _refresher.start()
         print(f"[iflow2api] 已启动 Token 自动刷新任务")
+        
+        # 初始化速率限制器
+        from .settings import load_settings
+        settings = load_settings()
+        rate_limit_config = RateLimitConfig(
+            enabled=settings.rate_limit_enabled,
+            requests_per_minute=settings.rate_limit_per_minute,
+            requests_per_hour=settings.rate_limit_per_hour,
+            requests_per_day=settings.rate_limit_per_day,
+        )
+        init_limiter(rate_limit_config)
+        _rate_limiter = get_rate_limiter()
+        print(f"[iflow2api] 速率限制: {'已启用' if settings.rate_limit_enabled else '已禁用'}")
+        if settings.rate_limit_enabled:
+            print(f"[iflow2api] 限流规则: {settings.rate_limit_per_minute}/分钟, {settings.rate_limit_per_hour}/小时, {settings.rate_limit_per_day}/天")
         
     except FileNotFoundError as e:
         print(f"[错误] {e}", file=sys.stderr)
@@ -376,10 +478,44 @@ async def lifespan(app: FastAPI):
 # 创建 FastAPI 应用
 app = FastAPI(
     title="iflow2api",
-    description="将 iFlow CLI 的 AI 服务暴露为 OpenAI 兼容 API",
-    version="0.1.0",
+    description="""
+## iflow2api - iFlow CLI AI 服务代理
+
+将 iFlow CLI 的 AI 服务暴露为 OpenAI 兼容 API，支持多种 AI 模型。
+
+### 功能特性
+
+- **OpenAI 兼容 API**: 支持 `/v1/chat/completions` 端点
+- **Anthropic 兼容 API**: 支持 `/v1/messages` 端点（Claude Code 兼容）
+- **多模型支持**: GLM-4.6/4.7/5、DeepSeek-V3.2、Qwen3-Coder-Plus、Kimi-K2/K2.5、MiniMax-M2.5
+- **流式响应**: 支持 SSE 流式输出
+- **OAuth 认证**: 支持 iFlow OAuth 登录
+
+### 支持的模型
+
+| 模型 ID | 名称 | 说明 |
+|---------|------|------|
+| `glm-4.6` | GLM-4.6 | 智谱 GLM-4.6 |
+| `glm-4.7` | GLM-4.7 | 智谱 GLM-4.7 |
+| `glm-5` | GLM-5 | 智谱 GLM-5 (推荐) |
+| `deepseek-v3.2-chat` | DeepSeek-V3.2 | DeepSeek V3.2 对话模型 |
+| `qwen3-coder-plus` | Qwen3-Coder-Plus | 通义千问 Qwen3 Coder |
+| `kimi-k2` | Kimi-K2 | Moonshot Kimi K2 |
+| `kimi-k2.5` | Kimi-K2.5 | Moonshot Kimi K2.5 |
+| `minimax-m2.5` | MiniMax-M2.5 | MiniMax M2.5 |
+
+### 使用方式
+
+1. 确保已安装并登录 iFlow CLI: `npm install -g @iflow-ai/iflow-cli && iflow login`
+2. 启动服务: `iflow2api` 或通过 GUI 启动
+3. 配置客户端使用 `http://localhost:28000/v1` 作为 API 端点
+""",
+    version="0.3.0",
     lifespan=lifespan,
-    redirect_slashes=True, # 自动处理末尾斜杠
+    redirect_slashes=True,  # 自动处理末尾斜杠
+    docs_url="/docs",  # Swagger UI
+    redoc_url="/redoc",  # ReDoc
+    openapi_url="/openapi.json",  # OpenAPI schema
 )
 
 # 添加 CORS 中间件
@@ -390,6 +526,37 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 添加速率限制中间件
+app.middleware("http")(create_rate_limit_middleware())
+
+
+# ============ 管理界面 ============
+
+# 挂载静态文件目录
+import os as _os
+_admin_static_dir = _os.path.join(_os.path.dirname(__file__), "admin", "static")
+if _os.path.exists(_admin_static_dir):
+    app.mount("/admin/static", StaticFiles(directory=_admin_static_dir), name="admin_static")
+
+
+@app.get("/admin", response_class=HTMLResponse, tags=["Admin"])
+@app.get("/admin/", response_class=HTMLResponse, tags=["Admin"])
+async def admin_page():
+    """管理界面入口"""
+    index_path = _os.path.join(_admin_static_dir, "index.html")
+    if _os.path.exists(index_path):
+        with open(index_path, "r", encoding="utf-8") as f:
+            return f.read()
+    return HTMLResponse(content="<h1>管理界面未找到</h1>", status_code=404)
+
+
+# 注册管理界面路由
+try:
+    from .admin.routes import admin_router, set_server_manager
+    app.include_router(admin_router)
+except ImportError as e:
+    print(f"[iflow2api] 警告: 无法加载管理界面路由: {e}")
 
 
 @app.middleware("http")
@@ -415,11 +582,13 @@ async def log_requests(request: Request, call_next):
 # ============ 请求/响应模型 ============
 
 class ChatMessage(BaseModel):
+    """聊天消息"""
     role: str
     content: Any  # 可以是字符串或内容块列表
 
 
 class ChatCompletionRequest(BaseModel):
+    """Chat Completions API 请求体"""
     model: str
     messages: list[ChatMessage]
     temperature: Optional[float] = None
@@ -435,24 +604,70 @@ class ChatCompletionRequest(BaseModel):
         extra = "allow"  # 允许额外字段
 
 
+# ============ 示例请求 ============
+
+OPENAI_CHAT_EXAMPLE = {
+    "model": "glm-5",
+    "messages": [
+        {"role": "system", "content": "你是一个有帮助的助手。"},
+        {"role": "user", "content": "你好，请介绍一下你自己。"}
+    ],
+    "temperature": 0.7,
+    "max_tokens": 1024,
+    "stream": False
+}
+
+OPENAI_CHAT_STREAM_EXAMPLE = {
+    "model": "glm-5",
+    "messages": [
+        {"role": "user", "content": "写一首关于春天的诗。"}
+    ],
+    "stream": True
+}
+
+ANTHROPIC_MESSAGES_EXAMPLE = {
+    "model": "claude-sonnet-4-5-20250929",
+    "max_tokens": 1024,
+    "system": "你是一个有帮助的助手。",
+    "messages": [
+        {"role": "user", "content": "你好，请介绍一下你自己。"}
+    ]
+}
+
+
 # ============ API 端点 ============
 
-@app.get("/")
+@app.get(
+    "/",
+    summary="根路径",
+    description="返回服务基本信息和可用端点列表",
+    response_description="服务信息",
+    tags=["基本信息"],
+)
 async def root():
     """根路径"""
     return {
         "service": "iflow2api",
-        "version": "0.1.0",
+        "version": "0.3.0",
         "description": "iFlow CLI AI 服务 → OpenAI 兼容 API",
         "endpoints": {
             "models": "/v1/models",
             "chat_completions": "/v1/chat/completions",
+            "messages": "/v1/messages",
             "health": "/health",
+            "docs": "/docs",
+            "redoc": "/redoc",
         },
     }
 
 
-@app.get("/health")
+@app.get(
+    "/health",
+    summary="健康检查",
+    description="检查服务健康状态和 iFlow 登录状态",
+    response_description="健康状态",
+    tags=["基本信息"],
+)
 async def health():
     """健康检查"""
     is_logged_in = check_iflow_login()
@@ -462,7 +677,13 @@ async def health():
     }
 
 
-@app.get("/v1/models")
+@app.get(
+    "/v1/models",
+    summary="获取模型列表",
+    description="获取所有可用的 AI 模型列表",
+    response_description="模型列表",
+    tags=["模型"],
+)
 async def list_models():
     """获取可用模型列表"""
     try:
@@ -470,6 +691,31 @@ async def list_models():
         return await proxy.get_models()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get(
+    "/v1/vision-models",
+    summary="获取视觉模型列表",
+    description="获取所有支持图像输入的视觉模型列表",
+    response_description="视觉模型列表",
+    tags=["模型"],
+)
+async def list_vision_models():
+    """获取支持视觉功能的模型列表"""
+    vision_models = get_vision_models_list()
+    return {
+        "object": "list",
+        "data": [
+            {
+                "id": model["id"],
+                "object": "model",
+                "owned_by": model["provider"],
+                "supports_vision": True,
+                "max_images": model["max_images"],
+            }
+            for model in vision_models
+        ],
+    }
 
 
 def create_error_response(status_code: int, message: str, error_type: str = "api_error") -> JSONResponse:
@@ -487,7 +733,97 @@ def create_error_response(status_code: int, message: str, error_type: str = "api
     )
 
 
-@app.post("/v1/chat/completions")
+@app.post(
+    "/v1/chat/completions",
+    summary="Chat Completions API (OpenAI 格式)",
+    description="""
+OpenAI 兼容的 Chat Completions API 端点。
+
+支持流式和非流式响应。使用 `stream: true` 启用流式输出。
+
+**支持的模型**: glm-4.6, glm-4.7, glm-5, deepseek-v3.2-chat, qwen3-coder-plus, kimi-k2, kimi-k2.5, minimax-m2.5
+""",
+    response_description="Chat completion 响应",
+    tags=["Chat"],
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["model", "messages"],
+                        "properties": {
+                            "model": {
+                                "type": "string",
+                                "description": "模型 ID",
+                                "example": "glm-5",
+                            },
+                            "messages": {
+                                "type": "array",
+                                "description": "对话消息列表",
+                                "items": {
+                                    "type": "object",
+                                    "required": ["role", "content"],
+                                    "properties": {
+                                        "role": {
+                                            "type": "string",
+                                            "enum": ["system", "user", "assistant"],
+                                            "description": "消息角色",
+                                        },
+                                        "content": {
+                                            "type": "string",
+                                            "description": "消息内容",
+                                        },
+                                    },
+                                },
+                            },
+                            "temperature": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 2,
+                                "description": "采样温度",
+                            },
+                            "top_p": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1,
+                                "description": "核采样参数",
+                            },
+                            "max_tokens": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": "最大生成 token 数",
+                            },
+                            "stream": {
+                                "type": "boolean",
+                                "description": "是否启用流式输出",
+                                "default": False,
+                            },
+                            "stop": {
+                                "oneOf": [
+                                    {"type": "string"},
+                                    {"type": "array", "items": {"type": "string"}},
+                                ],
+                                "description": "停止序列",
+                            },
+                        },
+                    },
+                    "examples": {
+                        "basic": {
+                            "summary": "基本对话",
+                            "value": OPENAI_CHAT_EXAMPLE,
+                        },
+                        "streaming": {
+                            "summary": "流式输出",
+                            "value": OPENAI_CHAT_STREAM_EXAMPLE,
+                        },
+                    },
+                }
+            },
+        }
+    },
+)
 @app.post("/v1/chat/completions/")
 @app.post("/chat/completions")
 @app.post("/chat/completions/")
@@ -593,7 +929,122 @@ async def chat_completions_openai(request: Request):
         return create_error_response(status_code, error_msg)
 
 
-@app.post("/v1/messages")
+@app.post(
+    "/v1/messages",
+    summary="Messages API (Anthropic 格式)",
+    description="""
+Anthropic 兼容的 Messages API 端点，支持 Claude Code 等客户端。
+
+请求格式与 Anthropic API 兼容，会自动转换为 OpenAI 格式并映射到 iFlow 模型。
+
+**模型映射**: Claude 系列模型会自动映射到 glm-5，也可直接指定 iFlow 模型 ID。
+""",
+    response_description="Messages 响应",
+    tags=["Chat"],
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["model", "max_tokens", "messages"],
+                        "properties": {
+                            "model": {
+                                "type": "string",
+                                "description": "模型 ID (Claude 系列会自动映射到 glm-5)",
+                                "example": "claude-sonnet-4-5-20250929",
+                            },
+                            "max_tokens": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": "最大生成 token 数",
+                            },
+                            "system": {
+                                "oneOf": [
+                                    {"type": "string"},
+                                    {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "type": {"type": "string", "enum": ["text"]},
+                                                "text": {"type": "string"},
+                                            },
+                                        },
+                                    },
+                                ],
+                                "description": "系统提示词",
+                            },
+                            "messages": {
+                                "type": "array",
+                                "description": "对话消息列表",
+                                "items": {
+                                    "type": "object",
+                                    "required": ["role", "content"],
+                                    "properties": {
+                                        "role": {
+                                            "type": "string",
+                                            "enum": ["user", "assistant"],
+                                            "description": "消息角色",
+                                        },
+                                        "content": {
+                                            "oneOf": [
+                                                {"type": "string"},
+                                                {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "type": {
+                                                                "type": "string",
+                                                                "enum": ["text", "image"],
+                                                            },
+                                                            "text": {"type": "string"},
+                                                        },
+                                                    },
+                                                },
+                                            ],
+                                            "description": "消息内容",
+                                        },
+                                    },
+                                },
+                            },
+                            "temperature": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1,
+                                "description": "采样温度",
+                            },
+                            "top_p": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1,
+                                "description": "核采样参数",
+                            },
+                            "stream": {
+                                "type": "boolean",
+                                "description": "是否启用流式输出",
+                                "default": False,
+                            },
+                            "stop_sequences": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "停止序列",
+                            },
+                        },
+                    },
+                    "examples": {
+                        "basic": {
+                            "summary": "基本对话",
+                            "value": ANTHROPIC_MESSAGES_EXAMPLE,
+                        },
+                    },
+                }
+            },
+        }
+    },
+)
 @app.post("/v1/messages/")
 @app.post("/messages")
 @app.post("/messages/")

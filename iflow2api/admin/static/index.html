@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>iFlow2API 管理后台</title>
+    <link rel="stylesheet" href="/admin/static/css/style.css">
+    <link rel="icon" href="/admin/static/favicon.ico" type="image/x-icon">
+</head>
+<body>
+    <!-- 登录页面 -->
+    <div id="login-page" class="page active">
+        <div class="login-container">
+            <div class="login-header">
+                <h1>iFlow2API</h1>
+                <p>管理后台</p>
+            </div>
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="username">用户名</label>
+                    <input type="text" id="username" name="username" required autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="password">密码</label>
+                    <input type="password" id="password" name="password" required autocomplete="current-password">
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">登录</button>
+                <p id="login-hint" class="hint"></p>
+            </form>
+        </div>
+    </div>
+
+    <!-- 主界面 -->
+    <div id="main-page" class="page">
+        <!-- 侧边栏 -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h2>iFlow2API</h2>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-item active" data-page="dashboard">
+                    <span class="icon">📊</span>
+                    <span>仪表盘</span>
+                </a>
+                <a href="#" class="nav-item" data-page="settings">
+                    <span class="icon">⚙️</span>
+                    <span>设置</span>
+                </a>
+                <a href="#" class="nav-item" data-page="users">
+                    <span class="icon">👥</span>
+                    <span>用户管理</span>
+                </a>
+                <a href="#" class="nav-item" data-page="logs">
+                    <span class="icon">📋</span>
+                    <span>日志</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <button id="logout-btn" class="btn btn-text">
+                    <span class="icon">🚪</span>
+                    <span>退出登录</span>
+                </button>
+            </div>
+        </aside>
+
+        <!-- 主内容区 -->
+        <main class="main-content">
+            <!-- 顶部栏 -->
+            <header class="topbar">
+                <div class="topbar-left">
+                    <h1 id="page-title">仪表盘</h1>
+                </div>
+                <div class="topbar-right">
+                    <span id="current-user"></span>
+                </div>
+            </header>
+
+            <!-- 内容区域 -->
+            <div class="content">
+                <!-- 仪表盘 -->
+                <section id="dashboard-section" class="section active">
+                    <div class="status-cards">
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="icon">🖥️</span>
+                                <span>服务器状态</span>
+                            </div>
+                            <div class="card-body">
+                                <div id="server-status" class="status-badge stopped">已停止</div>
+                                <p id="server-error" class="error-message"></p>
+                            </div>
+                            <div class="card-footer">
+                                <button id="start-server-btn" class="btn btn-success">启动</button>
+                                <button id="stop-server-btn" class="btn btn-danger" disabled>停止</button>
+                                <button id="restart-server-btn" class="btn btn-warning" disabled>重启</button>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="icon">⏱️</span>
+                                <span>运行时间</span>
+                            </div>
+                            <div class="card-body">
+                                <div id="uptime" class="big-number">--:--:--</div>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="icon">🔗</span>
+                                <span>WebSocket 连接</span>
+                            </div>
+                            <div class="card-body">
+                                <div id="ws-connections" class="big-number">0</div>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <span class="icon">📈</span>
+                                <span>请求统计</span>
+                            </div>
+                            <div class="card-body">
+                                <div class="stats-grid">
+                                    <div class="stat-item">
+                                        <span class="stat-label">每分钟</span>
+                                        <span id="requests-minute" class="stat-value">0</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-label">每小时</span>
+                                        <span id="requests-hour" class="stat-value">0</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-label">每天</span>
+                                        <span id="requests-day" class="stat-value">0</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card full-width">
+                        <div class="card-header">
+                            <span class="icon">💻</span>
+                            <span>系统信息</span>
+                        </div>
+                        <div class="card-body">
+                            <table class="info-table">
+                                <tr>
+                                    <td>操作系统</td>
+                                    <td id="system-platform">--</td>
+                                </tr>
+                                <tr>
+                                    <td>架构</td>
+                                    <td id="system-arch">--</td>
+                                </tr>
+                                <tr>
+                                    <td>Python 版本</td>
+                                    <td id="python-version">--</td>
+                                </tr>
+                                <tr>
+                                    <td>启动时间</td>
+                                    <td id="start-time">--</td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 设置页面 -->
+                <section id="settings-section" class="section">
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="icon">🌐</span>
+                            <span>服务器设置</span>
+                        </div>
+                        <div class="card-body">
+                            <form id="server-settings-form">
+                                <div class="form-group">
+                                    <label for="setting-host">监听地址</label>
+                                    <input type="text" id="setting-host" name="host">
+                                </div>
+                                <div class="form-group">
+                                    <label for="setting-port">端口</label>
+                                    <input type="number" id="setting-port" name="port" min="1" max="65535">
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="icon">🚀</span>
+                            <span>启动设置</span>
+                        </div>
+                        <div class="card-body">
+                            <form id="startup-settings-form">
+                                <div class="form-group checkbox">
+                                    <input type="checkbox" id="setting-auto-start" name="auto_start">
+                                    <label for="setting-auto-start">开机自启动</label>
+                                </div>
+                                <div class="form-group checkbox">
+                                    <input type="checkbox" id="setting-start-minimized" name="start_minimized">
+                                    <label for="setting-start-minimized">启动时最小化</label>
+                                </div>
+                                <div class="form-group checkbox">
+                                    <input type="checkbox" id="setting-minimize-to-tray" name="minimize_to_tray">
+                                    <label for="setting-minimize-to-tray">关闭时最小化到托盘</label>
+                                </div>
+                                <div class="form-group checkbox">
+                                    <input type="checkbox" id="setting-auto-run-server" name="auto_run_server">
+                                    <label for="setting-auto-run-server">启动时自动运行服务</label>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="icon">🎨</span>
+                            <span>界面设置</span>
+                        </div>
+                        <div class="card-body">
+                            <form id="ui-settings-form">
+                                <div class="form-group">
+                                    <label for="setting-theme">主题</label>
+                                    <select id="setting-theme" name="theme_mode">
+                                        <option value="system">跟随系统</option>
+                                        <option value="light">浅色</option>
+                                        <option value="dark">深色</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="setting-language">语言</label>
+                                    <select id="setting-language" name="language">
+                                        <option value="zh">中文</option>
+                                        <option value="en">English</option>
+                                    </select>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="icon">⚡</span>
+                            <span>速率限制</span>
+                        </div>
+                        <div class="card-body">
+                            <form id="rate-limit-settings-form">
+                                <div class="form-group checkbox">
+                                    <input type="checkbox" id="setting-rate-limit-enabled" name="rate_limit_enabled">
+                                    <label for="setting-rate-limit-enabled">启用速率限制</label>
+                                </div>
+                                <div class="form-group">
+                                    <label for="setting-rate-limit-minute">每分钟最大请求数</label>
+                                    <input type="number" id="setting-rate-limit-minute" name="rate_limit_per_minute" min="1">
+                                </div>
+                                <div class="form-group">
+                                    <label for="setting-rate-limit-hour">每小时最大请求数</label>
+                                    <input type="number" id="setting-rate-limit-hour" name="rate_limit_per_hour" min="1">
+                                </div>
+                                <div class="form-group">
+                                    <label for="setting-rate-limit-day">每天最大请求数</label>
+                                    <input type="number" id="setting-rate-limit-day" name="rate_limit_per_day" min="1">
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="icon">🧠</span>
+                            <span>思考链设置</span>
+                        </div>
+                        <div class="card-body">
+                            <form id="cot-settings-form">
+                                <div class="form-group checkbox">
+                                    <input type="checkbox" id="setting-preserve-reasoning" name="preserve_reasoning_content">
+                                    <label for="setting-preserve-reasoning">保留思考过程 (reasoning_content)</label>
+                                </div>
+                                <p class="hint">启用后，模型返回的思考过程将单独保留，客户端可分别处理思考过程和最终回答。</p>
+                            </form>
+                        </div>
+                    </div>
+
+                    <div class="actions-bar">
+                        <button id="save-settings-btn" class="btn btn-primary">保存设置</button>
+                        <button id="reset-settings-btn" class="btn btn-secondary">重置</button>
+                    </div>
+                </section>
+
+                <!-- 用户管理页面 -->
+                <section id="users-section" class="section">
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="icon">👥</span>
+                            <span>用户列表</span>
+                        </div>
+                        <div class="card-body">
+                            <table class="data-table" id="users-table">
+                                <thead>
+                                    <tr>
+                                        <th>用户名</th>
+                                        <th>创建时间</th>
+                                        <th>最后登录</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- 动态填充 -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="icon">➕</span>
+                            <span>添加用户</span>
+                        </div>
+                        <div class="card-body">
+                            <form id="add-user-form">
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="new-username">用户名</label>
+                                        <input type="text" id="new-username" name="username" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="new-password">密码</label>
+                                        <input type="password" id="new-password" name="password" required>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary">添加</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <span class="icon">🔑</span>
+                            <span>修改密码</span>
+                        </div>
+                        <div class="card-body">
+                            <form id="change-password-form">
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="old-password">原密码</label>
+                                        <input type="password" id="old-password" name="old_password" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="new-password-change">新密码</label>
+                                        <input type="password" id="new-password-change" name="new_password" required>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary">修改</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 日志页面 -->
+                <section id="logs-section" class="section">
+                    <div class="card full-width">
+                        <div class="card-header">
+                            <span class="icon">📋</span>
+                            <span>应用日志</span>
+                            <div class="header-actions">
+                                <button id="refresh-logs-btn" class="btn btn-secondary btn-sm">刷新</button>
+                                <button id="clear-logs-btn" class="btn btn-danger btn-sm">清空显示</button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div id="log-container" class="log-container">
+                                <pre id="log-content">加载中...</pre>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- Toast 通知 -->
+    <div id="toast-container"></div>
+
+    <script src="/admin/static/js/app.js"></script>
+</body>
+</html>
