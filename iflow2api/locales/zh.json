@@ -41,7 +41,8 @@
       "startup": "启动设置",
       "content": "内容处理",
       "appearance": "外观设置",
-      "rate_limit": "速率限制"
+      "rate_limit": "速率限制",
+      "update": "更新检查"
     },
     "rate_limit_enabled": "启用速率限制",
     "requests_per_minute": "每分钟请求数",
@@ -79,6 +80,24 @@
     "import_success": "已从 iFlow CLI 导入配置",
     "import_failed": "无法导入配置，请确保已运行 iflow 并完成登录",
     "login_success": "登录成功！配置已自动更新"
+  },
+  "update": {
+    "title": "发现新版本",
+    "current_version": "当前版本: {version}",
+    "new_version": "最新版本: {version}",
+    "published_at": "发布时间: {date}",
+    "release_notes": "更新内容:",
+    "no_notes": "暂无更新说明",
+    "download": "立即下载",
+    "skip_version": "忽略此版本",
+    "later": "稍后提醒",
+    "check_now": "检查更新",
+    "checking": "正在检查更新...",
+    "no_update": "已是最新版本",
+    "no_update_title": "检查更新",
+    "no_update_message": "您正在使用最新版本，无需更新。",
+    "error": "检查更新失败: {error}",
+    "current_version_info": "当前版本: {version}"
   },
   "log_title": "日志"
 }

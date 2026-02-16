@@ -41,7 +41,8 @@
       "startup": "Startup Settings",
       "content": "Content Processing",
       "appearance": "Appearance",
-      "rate_limit": "Rate Limiting"
+      "rate_limit": "Rate Limiting",
+      "update": "Update Check"
     },
     "rate_limit_enabled": "Enable rate limiting",
     "requests_per_minute": "Requests per minute",
@@ -79,6 +80,24 @@
     "import_success": "Config imported from iFlow CLI",
     "import_failed": "Cannot import config. Please make sure iflow is running and logged in",
     "login_success": "Login successful! Config updated automatically"
+  },
+  "update": {
+    "title": "New Version Available",
+    "current_version": "Current version: {version}",
+    "new_version": "Latest version: {version}",
+    "published_at": "Published: {date}",
+    "release_notes": "Release notes:",
+    "no_notes": "No release notes available",
+    "download": "Download",
+    "skip_version": "Skip this version",
+    "later": "Remind me later",
+    "check_now": "Check for Updates",
+    "checking": "Checking for updates...",
+    "no_update": "You're using the latest version",
+    "no_update_title": "Check for Updates",
+    "no_update_message": "You are using the latest version. No update needed.",
+    "error": "Failed to check for updates: {error}",
+    "current_version_info": "Current version: {version}"
   },
   "log_title": "Log"
 }

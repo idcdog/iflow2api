@@ -6,6 +6,8 @@ Exposes iFlow CLI's AI services as an OpenAI-compatible API.
 
 ## Features
 
+### Core Features
+
 - Automatically reads iFlow configuration file (`~/.iflow/settings.json`)
 - Provides OpenAI-compatible API endpoints
 - Supports both streaming and non-streaming responses
@@ -13,6 +15,26 @@ Exposes iFlow CLI's AI services as an OpenAI-compatible API.
 - Built-in GUI OAuth login interface - no need to install iFlow CLI
 - Supports automatic OAuth token refresh
 - Compatible with Anthropic Messages API, can directly connect to Claude Code
+
+### Desktop Application
+
+- **System Tray** - Minimize to tray, tray menu, status display
+- **Cross-platform Auto-start** - Windows (Registry) / macOS (LaunchAgent) / Linux (XDG autostart)
+- **Dark Theme** - Light/Dark/Follow system theme switching
+- **Multi-language Support** - English/Chinese interface switching
+
+### Management Features
+
+- **Web Admin Interface** - Independent management page, remote management and authentication
+- **Multi-instance Management** - Multiple service instances, different port configurations
+- **API Documentation** - Swagger UI (`/docs`) + ReDoc (`/redoc`)
+- **Rate Limiting** - Client request throttling, configurable rules
+
+### Advanced Features
+
+- **Vision Support** - Image input, Base64 encoding, URL support
+- **Config Encryption** - Encrypted storage of sensitive configuration
+- **Docker Support** - Dockerfile and docker-compose.yml provided
 
 ## Supported Models
 
@@ -105,6 +127,35 @@ python -c "import uvicorn; from iflow2api.app import app; uvicorn.run(app, host=
 | `/v1/messages`          | POST   | Messages API (Anthropic format, Claude Code compatible) |
 | `/models`               | GET    | Compatible endpoint (without /v1 prefix)            |
 | `/chat/completions`     | POST   | Compatible endpoint (without /v1 prefix)            |
+| `/docs`                 | GET    | Swagger UI API Documentation                        |
+| `/redoc`                | GET    | ReDoc API Documentation                             |
+| `/admin`                | GET    | Web Admin Interface                                 |
+
+## Docker Deployment
+
+```bash
+# Using docker-compose
+docker-compose up -d
+
+# Or build and run directly
+docker build -t iflow2api .
+docker run -d -p 28000:28000 -v ~/.iflow:/root/.iflow iflow2api
+```
+
+For detailed deployment instructions, see [Docker Deployment Guide](docs/DOCKER.md).
+
+## Web Admin Interface
+
+iflow2api provides an independent web admin interface for remote management:
+
+- URL: `http://localhost:28000/admin`
+- Default username/password: `admin` / `admin`
+
+**Features**:
+- Real-time service status monitoring
+- Multi-instance management
+- Remote start/stop services
+- Configuration management
 
 ## Advanced Configuration
 

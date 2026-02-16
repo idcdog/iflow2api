@@ -50,7 +50,7 @@ class IFlowProxy:
         self._session_id = str(uuid.uuid4())
         self._conversation_id = str(uuid.uuid4())
 
-    def _get_headers(self) -> dict:
+    def _get_headers(self, stream: bool = False) -> dict:
         """
         获取请求头
         
@@ -61,6 +61,9 @@ class IFlowProxy:
         - x-iflow-signature: HMAC-SHA256 签名
         - x-iflow-timestamp: 时间戳(毫秒)
         - installation-id: 安装ID
+        
+        Args:
+            stream: 是否流式请求，流式请求时不设置 Accept 头以避免上游返回 JSON
         """
         timestamp = int(time.time() * 1000)  # 毫秒时间戳
         
@@ -70,8 +73,11 @@ class IFlowProxy:
             "User-Agent": IFLOW_CLI_USER_AGENT,
             "session-id": self._session_id,
             "conversation-id": self._conversation_id,
-            "Accept": "application/json",
         }
+        
+        # 非流式请求设置 Accept 头，流式请求不设置以让上游返回 SSE
+        if not stream:
+            headers["Accept"] = "application/json"
         
         # 添加 installation-id
         if self.config.installation_id:
@@ -153,6 +159,13 @@ class IFlowProxy:
             preserve_reasoning: 是否保留 reasoning_content 字段
                 - False（默认）: 将 reasoning_content 合并到 content，确保兼容性
                 - True: 保留 reasoning_content 字段，客户端可分别处理思考过程和最终回答
+        
+        上游API行为（GLM-5）：
+        - 流式响应：思考过程和回答分开返回
+          - 大部分chunk只有 reasoning_content（思考过程）
+          - 少部分chunk只有 content（最终回答）
+          - 两者不会同时出现在同一个chunk中
+        - 非流式响应：content 是最终回答，reasoning_content 是思考链（两者不同）
         """
         choices = chunk_data.get("choices", [])
         for choice in choices:
@@ -161,16 +174,26 @@ class IFlowProxy:
             reasoning_content = delta.get("reasoning_content")
             
             if not content and reasoning_content:
+                # 只有 reasoning_content 有值（思考过程chunk）
                 if preserve_reasoning:
-                    # 保留 reasoning_content，同时复制到 content 以确保兼容性
-                    delta["content"] = reasoning_content
+                    # 保留 reasoning_content 字段，不复制到 content
+                    # 支持思考链的客户端会读取 reasoning_content
+                    # 不支持的客户端会跳过这个chunk，等回答chunk
+                    pass
                 else:
-                    # 将 reasoning_content 移动到 content（删除原字段）
+                    # 不保留思考链，将 reasoning_content 移动到 content
                     delta["content"] = reasoning_content
                     del delta["reasoning_content"]
-            elif content and reasoning_content and not preserve_reasoning:
-                # 两者都有值，但不保留 reasoning_content
-                del delta["reasoning_content"]
+            elif content and reasoning_content:
+                # 两者都有值（理论上不应该发生，但做防御性处理）
+                if content == reasoning_content:
+                    # 内容相同，只保留 content，避免重复
+                    del delta["reasoning_content"]
+                elif not preserve_reasoning:
+                    # 内容不同且不保留 reasoning_content
+                    del delta["reasoning_content"]
+                # 如果内容不同且 preserve_reasoning=True，保留两者
+            # 如果只有 content 有值，不需要处理，直接保留
         
         return chunk_data
 
@@ -303,7 +326,7 @@ class IFlowProxy:
                     async with client.stream(
                         "POST",
                         f"{self.base_url}/chat/completions",
-                        headers=self._get_headers(),
+                        headers=self._get_headers(stream=True),
                         json=request_body,
                         timeout=httpx.Timeout(300.0, connect=10.0),
                     ) as response:
@@ -448,7 +471,7 @@ class IFlowProxy:
                     async with client.stream(
                         "POST",
                         url,
-                        headers=self._get_headers(),
+                        headers=self._get_headers(stream=True),
                         json=body,
                         timeout=httpx.Timeout(300.0, connect=10.0),
                     ) as response:

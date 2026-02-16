@@ -53,6 +53,10 @@ class AppSettings(BaseModel):
     # 语言设置
     language: str = "zh"  # 界面语言: zh, en
 
+    # 更新检查设置
+    check_update_on_startup: bool = True  # 启动时检查更新
+    skip_version: str = ""  # 跳过的版本号
+
 
 def get_config_dir() -> Path:
     """获取应用配置目录"""
@@ -118,6 +122,11 @@ def load_settings() -> AppSettings:
                     settings.oauth_refresh_token = data["oauth_refresh_token"]
                 if "oauth_expires_at" in data:
                     settings.oauth_expires_at = data["oauth_expires_at"]
+                # 更新检查设置
+                if "check_update_on_startup" in data:
+                    settings.check_update_on_startup = data["check_update_on_startup"]
+                if "skip_version" in data:
+                    settings.skip_version = data["skip_version"]
         except Exception:
             pass
 
@@ -180,6 +189,9 @@ def save_settings(settings: AppSettings) -> None:
         "preserve_reasoning_content": settings.preserve_reasoning_content,
         # 语言设置
         "language": settings.language,
+        # 更新检查设置
+        "check_update_on_startup": settings.check_update_on_startup,
+        "skip_version": settings.skip_version,
     }
 
     config_path = get_config_path()

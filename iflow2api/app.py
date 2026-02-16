@@ -747,8 +747,68 @@ OpenAI 兼容的 Chat Completions API 端点。
     tags=["Chat"],
     openapi_extra={
         "requestBody": {
+            "required": True,
             "content": {
                 "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["model", "messages"],
+                        "properties": {
+                            "model": {
+                                "type": "string",
+                                "description": "模型 ID",
+                                "example": "glm-5",
+                            },
+                            "messages": {
+                                "type": "array",
+                                "description": "对话消息列表",
+                                "items": {
+                                    "type": "object",
+                                    "required": ["role", "content"],
+                                    "properties": {
+                                        "role": {
+                                            "type": "string",
+                                            "enum": ["system", "user", "assistant"],
+                                            "description": "消息角色",
+                                        },
+                                        "content": {
+                                            "type": "string",
+                                            "description": "消息内容",
+                                        },
+                                    },
+                                },
+                            },
+                            "temperature": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 2,
+                                "description": "采样温度",
+                            },
+                            "top_p": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1,
+                                "description": "核采样参数",
+                            },
+                            "max_tokens": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": "最大生成 token 数",
+                            },
+                            "stream": {
+                                "type": "boolean",
+                                "description": "是否启用流式输出",
+                                "default": False,
+                            },
+                            "stop": {
+                                "oneOf": [
+                                    {"type": "string"},
+                                    {"type": "array", "items": {"type": "string"}},
+                                ],
+                                "description": "停止序列",
+                            },
+                        },
+                    },
                     "examples": {
                         "basic": {
                             "summary": "基本对话",
@@ -758,9 +818,9 @@ OpenAI 兼容的 Chat Completions API 端点。
                             "summary": "流式输出",
                             "value": OPENAI_CHAT_STREAM_EXAMPLE,
                         },
-                    }
+                    },
                 }
-            }
+            },
         }
     },
 )
@@ -883,16 +943,105 @@ Anthropic 兼容的 Messages API 端点，支持 Claude Code 等客户端。
     tags=["Chat"],
     openapi_extra={
         "requestBody": {
+            "required": True,
             "content": {
                 "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["model", "max_tokens", "messages"],
+                        "properties": {
+                            "model": {
+                                "type": "string",
+                                "description": "模型 ID (Claude 系列会自动映射到 glm-5)",
+                                "example": "claude-sonnet-4-5-20250929",
+                            },
+                            "max_tokens": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": "最大生成 token 数",
+                            },
+                            "system": {
+                                "oneOf": [
+                                    {"type": "string"},
+                                    {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "type": {"type": "string", "enum": ["text"]},
+                                                "text": {"type": "string"},
+                                            },
+                                        },
+                                    },
+                                ],
+                                "description": "系统提示词",
+                            },
+                            "messages": {
+                                "type": "array",
+                                "description": "对话消息列表",
+                                "items": {
+                                    "type": "object",
+                                    "required": ["role", "content"],
+                                    "properties": {
+                                        "role": {
+                                            "type": "string",
+                                            "enum": ["user", "assistant"],
+                                            "description": "消息角色",
+                                        },
+                                        "content": {
+                                            "oneOf": [
+                                                {"type": "string"},
+                                                {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "type": {
+                                                                "type": "string",
+                                                                "enum": ["text", "image"],
+                                                            },
+                                                            "text": {"type": "string"},
+                                                        },
+                                                    },
+                                                },
+                                            ],
+                                            "description": "消息内容",
+                                        },
+                                    },
+                                },
+                            },
+                            "temperature": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1,
+                                "description": "采样温度",
+                            },
+                            "top_p": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1,
+                                "description": "核采样参数",
+                            },
+                            "stream": {
+                                "type": "boolean",
+                                "description": "是否启用流式输出",
+                                "default": False,
+                            },
+                            "stop_sequences": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "停止序列",
+                            },
+                        },
+                    },
                     "examples": {
                         "basic": {
                             "summary": "基本对话",
                             "value": ANTHROPIC_MESSAGES_EXAMPLE,
                         },
-                    }
+                    },
                 }
-            }
+            },
         }
     },
 )

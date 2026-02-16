@@ -4,6 +4,8 @@ import flet as ft
 from datetime import datetime
 from typing import Optional
 import threading
+import webbrowser
+import asyncio
 
 from .settings import (
     AppSettings,
@@ -17,8 +19,12 @@ from .server import ServerManager, ServerState
 from .tray import TrayManager, is_tray_available
 from .i18n import t, set_language, get_available_languages
 from .ratelimit import RateLimitConfig, get_rate_limiter, update_rate_limiter_settings
-import webbrowser
-import asyncio
+from .updater import (
+    get_current_version,
+    check_for_updates,
+    format_release_notes,
+    GITHUB_RELEASES_URL,
+)
 
 
 class IFlow2ApiApp:
@@ -64,6 +70,10 @@ class IFlow2ApiApp:
         # 启动时最小化
         if self.settings.start_minimized:
             self.page.window.minimized = True
+
+        # 启动时检查更新
+        if self.settings.check_update_on_startup:
+            self._check_for_updates_async(silent=True)
 
     def _setup_page(self):
         """设置页面"""
@@ -370,6 +380,21 @@ class IFlow2ApiApp:
             # 从后台线程添加日志
             log_msg = message.get("message", "")
             self._add_log(log_msg)
+        
+        elif msg_type == "update_available":
+            # 发现新版本
+            release_info = message.get("release_info", {})
+            self._show_update_dialog(release_info)
+        
+        elif msg_type == "no_update":
+            # 已是最新版本 - 显示对话框
+            self._show_no_update_dialog()
+        
+        elif msg_type == "update_error":
+            # 检查更新出错
+            error = message.get("error", "Unknown error")
+            self._show_snack_bar(t("update.error", error=error), color=ft.Colors.RED)
+            self._add_log(t("update.error", error=error))
 
     def _on_server_state_change_threadsafe(self, state: ServerState, message: str):
         """服务状态变化回调 - 线程安全版本，从后台线程调用"""
@@ -616,6 +641,22 @@ class IFlow2ApiApp:
                     [requests_per_day_field],
                     alignment=ft.MainAxisAlignment.START,
                 ),
+                
+                ft.Divider(),
+                
+                # 更新检查设置
+                ft.Text(t("settings.section.update"), weight=ft.FontWeight.BOLD, size=14),
+                ft.Row(
+                    [
+                        ft.Button(
+                            t("update.check_now"),
+                            icon=ft.Icons.UPDATE,
+                            on_click=lambda e: self._check_for_updates_manual(e),
+                        ),
+                        ft.Text(t("update.current_version_info", version=get_current_version()), size=12),
+                    ],
+                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                ),
             ],
             spacing=10,
         )
@@ -693,6 +734,185 @@ class IFlow2ApiApp:
 
         handler = OAuthLoginHandler(self._add_log_threadsafe, success_callback=on_login_success)
         handler.start_login()
+
+    def _check_for_updates_async(self, silent: bool = False, force: bool = False):
+        """异步检查更新
+
+        Args:
+            silent: 是否静默检查（无更新时不提示）
+            force: 是否强制检查（忽略跳过版本设置）
+        """
+        def do_check():
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                has_update, release_info = loop.run_until_complete(check_for_updates())
+                loop.close()
+
+                if has_update and release_info:
+                    # 检查是否跳过此版本（强制检查时忽略）
+                    if not force and release_info.version == self.settings.skip_version:
+                        return
+
+                    # 通过 pubsub 发送消息到主线程显示更新对话框
+                    self.page.pubsub.send_all({
+                        "type": "update_available",
+                        "release_info": {
+                            "version": release_info.version,
+                            "html_url": release_info.html_url,
+                            "published_at": release_info.published_at.strftime("%Y-%m-%d"),
+                            "body": release_info.body,
+                        },
+                    })
+                elif not silent:
+                    # 非静默模式，提示已是最新版本
+                    self.page.pubsub.send_all({"type": "no_update"})
+            except Exception as e:
+                if not silent:
+                    self.page.pubsub.send_all({"type": "update_error", "error": str(e)})
+
+        thread = threading.Thread(target=do_check, daemon=True)
+        thread.start()
+
+    def _show_update_dialog(self, release_info: dict):
+        """显示更新对话框
+
+        Args:
+            release_info: 发布版本信息
+        """
+        current_version = get_current_version()
+        new_version = release_info.get("version", "unknown")
+        html_url = release_info.get("html_url", GITHUB_RELEASES_URL)
+        published_at = release_info.get("published_at", "")
+        body = release_info.get("body", "")
+
+        # 格式化更新说明
+        release_notes = format_release_notes(body, max_length=300)
+
+        def on_download(e):
+            """下载更新"""
+            webbrowser.open(html_url)
+            if hasattr(self.page, "close"):
+                self.page.close(dlg)
+            else:
+                dlg.open = False
+                self.page.update()
+
+        def on_skip(e):
+            """跳过此版本"""
+            self.settings.skip_version = new_version
+            save_settings(self.settings)
+            if hasattr(self.page, "close"):
+                self.page.close(dlg)
+            else:
+                dlg.open = False
+                self.page.update()
+
+        def on_later(e):
+            """稍后提醒"""
+            if hasattr(self.page, "close"):
+                self.page.close(dlg)
+            else:
+                dlg.open = False
+                self.page.update()
+
+        # 创建对话框内容
+        content_column = ft.Column(
+            [
+                ft.Text(t("update.current_version", version=current_version)),
+                ft.Text(t("update.new_version", version=new_version), weight=ft.FontWeight.BOLD),
+                ft.Text(t("update.published_at", date=published_at)),
+                ft.Divider(),
+                ft.Text(t("update.release_notes"), weight=ft.FontWeight.BOLD),
+                ft.Container(
+                    content=ft.Text(release_notes if release_notes else t("update.no_notes"), size=12),
+                    padding=10,
+                    bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST,
+                    border_radius=8,
+                ),
+            ],
+            spacing=8,
+        )
+
+        dlg = ft.AlertDialog(
+            title=ft.Row(
+                [
+                    ft.Icon(ft.Icons.NEW_RELEASES, color=ft.Colors.GREEN),
+                    ft.Text(t("update.title")),
+                ]
+            ),
+            content=ft.Container(
+                content=content_column,
+                width=400,
+                height=300,
+            ),
+            actions=[
+                ft.TextButton(t("update.skip_version"), on_click=on_skip),
+                ft.TextButton(t("update.later"), on_click=on_later),
+                ft.Button(
+                    t("update.download"),
+                    icon=ft.Icons.DOWNLOAD,
+                    on_click=on_download,
+                    style=ft.ButtonStyle(bgcolor=ft.Colors.GREEN, color=ft.Colors.WHITE),
+                ),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+
+        # 打开对话框
+        if hasattr(self.page, "open"):
+            self.page.open(dlg)
+        else:
+            dlg.open = True
+            self.page.add(dlg)
+            self.page.update()
+
+    def _show_no_update_dialog(self):
+        """显示已是最新版本的对话框"""
+        current_version = get_current_version()
+
+        def on_close(e):
+            if hasattr(self.page, "close"):
+                self.page.close(dlg)
+            else:
+                dlg.open = False
+                self.page.update()
+
+        dlg = ft.AlertDialog(
+            title=ft.Row(
+                [
+                    ft.Icon(ft.Icons.CHECK_CIRCLE, color=ft.Colors.GREEN),
+                    ft.Text(t("update.no_update_title")),
+                ]
+            ),
+            content=ft.Container(
+                content=ft.Column(
+                    [
+                        ft.Text(t("update.current_version", version=current_version)),
+                        ft.Text(t("update.no_update_message"), size=12),
+                    ],
+                    spacing=8,
+                ),
+                width=300,
+            ),
+            actions=[
+                ft.TextButton(t("button.confirm"), on_click=on_close),
+            ],
+            actions_alignment=ft.MainAxisAlignment.END,
+        )
+
+        # 打开对话框
+        if hasattr(self.page, "open"):
+            self.page.open(dlg)
+        else:
+            dlg.open = True
+            self.page.add(dlg)
+            self.page.update()
+
+    def _check_for_updates_manual(self, e):
+        """手动检查更新"""
+        self._add_log(t("update.checking"))
+        self._check_for_updates_async(silent=False, force=True)
 
 
 def main(page: ft.Page):
