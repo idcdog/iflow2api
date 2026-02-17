@@ -3,6 +3,7 @@
 import sys
 import json
 import uuid
+import asyncio
 from contextlib import asynccontextmanager
 from typing import Any, Optional
 
@@ -129,29 +130,52 @@ def create_anthropic_stream_message_start(model: str) -> str:
     return f"event: message_start\ndata: {json.dumps(data)}\n\n"
 
 
-def create_anthropic_content_block_start() -> str:
-    """创建 Anthropic 流式响应的 content_block_start 事件"""
+def create_anthropic_content_block_start(index: int = 0, block_type: str = "text") -> str:
+    """创建 Anthropic 流式响应的 content_block_start 事件
+    
+    Args:
+        index: 内容块索引
+        block_type: 内容块类型 ("text" 或 "thinking")
+    """
+    if block_type == "thinking":
+        content_block = {"type": "thinking", "thinking": ""}
+    else:
+        content_block = {"type": "text", "text": ""}
     data = {
         "type": "content_block_start",
-        "index": 0,
-        "content_block": {"type": "text", "text": ""}
+        "index": index,
+        "content_block": content_block
     }
     return f"event: content_block_start\ndata: {json.dumps(data)}\n\n"
 
 
-def create_anthropic_content_block_delta(text: str) -> str:
-    """创建 Anthropic 流式响应的 content_block_delta 事件"""
+def create_anthropic_content_block_delta(text: str, index: int = 0, delta_type: str = "text_delta") -> str:
+    """创建 Anthropic 流式响应的 content_block_delta 事件
+    
+    Args:
+        text: 内容文本
+        index: 内容块索引
+        delta_type: delta 类型 ("text_delta" 或 "thinking_delta")
+    """
+    if delta_type == "thinking_delta":
+        delta = {"type": "thinking_delta", "thinking": text}
+    else:
+        delta = {"type": "text_delta", "text": text}
     data = {
         "type": "content_block_delta",
-        "index": 0,
-        "delta": {"type": "text_delta", "text": text}
+        "index": index,
+        "delta": delta
     }
     return f"event: content_block_delta\ndata: {json.dumps(data)}\n\n"
 
 
-def create_anthropic_content_block_stop() -> str:
-    """创建 Anthropic 流式响应的 content_block_stop 事件"""
-    data = {"type": "content_block_stop", "index": 0}
+def create_anthropic_content_block_stop(index: int = 0) -> str:
+    """创建 Anthropic 流式响应的 content_block_stop 事件
+    
+    Args:
+        index: 内容块索引
+    """
+    data = {"type": "content_block_stop", "index": index}
     return f"event: content_block_stop\ndata: {json.dumps(data)}\n\n"
 
 
@@ -188,14 +212,17 @@ def parse_openai_sse_chunk(line: str) -> Optional[dict]:
     return None
 
 
-def extract_content_from_delta(delta: dict, preserve_reasoning: bool = False) -> str:
+def extract_content_from_delta(delta: dict, preserve_reasoning: bool = False) -> tuple[str, str]:
     """从 OpenAI delta 中提取内容
     
     Args:
         delta: OpenAI 流式响应的 delta 对象
-        preserve_reasoning: 是否保留思考链模式
-            - False（默认）: 将 reasoning_content 也作为内容输出（兼容模式）
-            - True: 只输出 content，跳过 reasoning_content（思考链模式）
+        preserve_reasoning: 是否区分思考内容和回答内容
+            - False（默认）: 将 reasoning_content 也作为普通文本输出（兼容模式）
+            - True: 区分思考内容和回答内容，返回 (内容, 类型) 元组
+    
+    Returns:
+        (内容, 类型) 元组，类型为 "text"、"thinking" 或 ""
     
     上游API行为（GLM-5）：
     - 流式响应：思考过程和回答分开返回
@@ -208,14 +235,17 @@ def extract_content_from_delta(delta: dict, preserve_reasoning: bool = False) ->
     
     if content:
         # 有 content，直接返回（这是最终回答）
-        return content
-    elif reasoning_content and not preserve_reasoning:
-        # 只有 reasoning_content，且不保留思考链模式，返回思考内容（兼容模式）
-        return reasoning_content
+        return (content, "text")
+    elif reasoning_content:
+        if preserve_reasoning:
+            # 区分思考内容，标记为 thinking 类型
+            return (reasoning_content, "thinking")
+        else:
+            # 兼容模式，将思考内容作为普通文本输出
+            return (reasoning_content, "text")
     else:
-        # 只有 reasoning_content，但 preserve_reasoning=True，跳过这个 chunk
-        # 或者两者都为空
-        return ""
+        # 两者都为空
+        return ("", "")
 
 
 # ============ Anthropic → OpenAI 请求转换 ============
@@ -406,6 +436,9 @@ _proxy: Optional[IFlowProxy] = None
 _config: Optional[IFlowConfig] = None
 _refresher: Optional[OAuthTokenRefresher] = None
 _rate_limiter = None
+
+# 请求队列锁 - 确保同一时间只处理一个上游 API 请求
+_api_request_lock = asyncio.Lock()
 
 
 def get_proxy() -> IFlowProxy:
@@ -863,44 +896,45 @@ async def chat_completions_openai(request: Request):
         print(f"[iflow2api] Chat请求: model={model}, stream={stream}, messages={msg_count}, has_tools={has_tools}")
 
         if stream:
-            # 获取流式迭代器
+            # 流式响应 - 整个流式传输过程都在锁内进行
             try:
-                # chat_completions 是 async def，返回一个 AsyncIterator
-                stream_gen = await proxy.chat_completions(body, stream=True)
-                
-                async def generate():
-                    chunk_count = 0
-                    try:
-                        async for chunk in stream_gen:
-                            chunk_count += 1
-                            if chunk_count <= 3:
-                                print(f"[iflow2api] 流式chunk[{chunk_count}]: {chunk[:200]}")
-                            yield chunk
-                    except Exception as e:
-                        # 传输过程中的错误
-                        print(f"[iflow2api] Streaming error after {chunk_count} chunks: {e}")
-                    finally:
-                        print(f"[iflow2api] 流式完成: 共 {chunk_count} chunks")
-                        if chunk_count == 0:
-                            # 上游返回了空的流式响应，生成一个错误回退
-                            print(f"[iflow2api] 生成错误回退响应 (0 chunks from upstream)")
-                            import time as _time
-                            fallback = {
-                                "id": f"fallback-{int(_time.time())}",
-                                "object": "chat.completion.chunk",
-                                "created": int(_time.time()),
-                                "model": model,
-                                "choices": [{
-                                    "index": 0,
-                                    "delta": {"role": "assistant", "content": "[Error] 上游 API 返回了空响应，可能是对话过长或服务暂时不可用，请缩短对话后重试。"},
-                                    "finish_reason": "stop"
-                                }]
-                            }
-                            yield ("data: " + json.dumps(fallback, ensure_ascii=False) + "\n\n").encode("utf-8")
-                            yield b"data: [DONE]\n\n"
+                async def generate_with_lock():
+                    """在锁内完成整个流式传输"""
+                    async with _api_request_lock:
+                        print(f"[iflow2api] 获取上游流式响应...")
+                        stream_gen = await proxy.chat_completions(body, stream=True)
+                        chunk_count = 0
+                        try:
+                            async for chunk in stream_gen:
+                                chunk_count += 1
+                                if chunk_count <= 3:
+                                    print(f"[iflow2api] 流式chunk[{chunk_count}]: {chunk[:200]}")
+                                yield chunk
+                        except Exception as e:
+                            # 传输过程中的错误
+                            print(f"[iflow2api] Streaming error after {chunk_count} chunks: {e}")
+                        finally:
+                            print(f"[iflow2api] 流式完成: 共 {chunk_count} chunks")
+                            if chunk_count == 0:
+                                # 上游返回了空的流式响应，生成一个错误回退
+                                print(f"[iflow2api] 生成错误回退响应 (0 chunks from upstream)")
+                                import time as _time
+                                fallback = {
+                                    "id": f"fallback-{int(_time.time())}",
+                                    "object": "chat.completion.chunk",
+                                    "created": int(_time.time()),
+                                    "model": model,
+                                    "choices": [{
+                                        "index": 0,
+                                        "delta": {"role": "assistant", "content": "[Error] 上游 API 返回了空响应，可能是对话过长或服务暂时不可用，请缩短对话后重试。"},
+                                        "finish_reason": "stop"
+                                    }]
+                                }
+                                yield ("data: " + json.dumps(fallback, ensure_ascii=False) + "\n\n").encode("utf-8")
+                                yield b"data: [DONE]\n\n"
                 
                 return StreamingResponse(
-                    generate(),
+                    generate_with_lock(),
                     media_type="text/event-stream",
                     headers={
                         "Cache-Control": "no-cache",
@@ -918,7 +952,10 @@ async def chat_completions_openai(request: Request):
                         pass
                 return create_error_response(500, error_msg)
         else:
-            result = await proxy.chat_completions(body, stream=False)
+            # 使用锁确保同一时间只有一个上游请求
+            async with _api_request_lock:
+                print(f"[iflow2api] 获取上游非流式响应...")
+                result = await proxy.chat_completions(body, stream=False)
             # 验证响应包含有效的 choices
             if not result.get("choices"):
                 print(f"[iflow2api] 错误: API 响应缺少 choices 数组")
@@ -1094,53 +1131,85 @@ async def messages_anthropic(request: Request):
             settings = load_settings()
             preserve_reasoning = settings.preserve_reasoning_content
             
-            async def generate_anthropic_stream():
-                # 发送 message_start
-                yield create_anthropic_stream_message_start(mapped_model).encode('utf-8')
-                # 发送 content_block_start
-                yield create_anthropic_content_block_start().encode('utf-8')
-                
-                output_tokens = 0
-                buffer = ""
-                
-                async for chunk in await proxy.chat_completions(openai_body, stream=True):
-                    # OpenAI 流式数据是 bytes，需要解码
-                    chunk_str = chunk.decode('utf-8') if isinstance(chunk, bytes) else chunk
-                    buffer += chunk_str
+            # 整个流式传输过程都在锁内进行
+            async def generate_anthropic_stream_with_lock():
+                """在锁内完成整个流式传输"""
+                async with _api_request_lock:
+                    print(f"[iflow2api] 获取上游流式响应 (Anthropic)...")
+                    stream_gen = await proxy.chat_completions(openai_body, stream=True)
                     
-                    # 按行处理
-                    while "\n" in buffer:
-                        line, buffer = buffer.split("\n", 1)
-                        parsed = parse_openai_sse_chunk(line)
-                        if parsed:
-                            choices = parsed.get("choices", [])
-                            if choices:
-                                delta = choices[0].get("delta", {})
-                                content = extract_content_from_delta(delta, preserve_reasoning)
-                                if content:
-                                    output_tokens += len(content) // 4  # 粗略估计 token
-                                    yield create_anthropic_content_block_delta(content).encode('utf-8')
-                
-                # 处理剩余 buffer
-                for line in buffer.split("\n"):
-                    if line.strip():
-                        parsed = parse_openai_sse_chunk(line)
-                        if parsed:
-                            choices = parsed.get("choices", [])
-                            if choices:
-                                delta = choices[0].get("delta", {})
-                                content = extract_content_from_delta(delta, preserve_reasoning)
-                                if content:
-                                    output_tokens += len(content) // 4
-                                    yield create_anthropic_content_block_delta(content).encode('utf-8')
-                
-                # 发送结束事件
-                yield create_anthropic_content_block_stop().encode('utf-8')
-                yield create_anthropic_message_delta("end_turn", output_tokens).encode('utf-8')
-                yield create_anthropic_message_stop().encode('utf-8')
+                    # 发送 message_start
+                    yield create_anthropic_stream_message_start(mapped_model).encode('utf-8')
+                    
+                    output_tokens = 0
+                    buffer = ""
+                    current_block_type = None  # 当前内容块类型: None, "thinking", "text"
+                    block_index = 0
+                    
+                    async for chunk in stream_gen:
+                        # OpenAI 流式数据是 bytes，需要解码
+                        chunk_str = chunk.decode('utf-8') if isinstance(chunk, bytes) else chunk
+                        buffer += chunk_str
+                        
+                        # 按行处理
+                        while "\n" in buffer:
+                            line, buffer = buffer.split("\n", 1)
+                            parsed = parse_openai_sse_chunk(line)
+                            if parsed:
+                                choices = parsed.get("choices", [])
+                                if choices:
+                                    delta = choices[0].get("delta", {})
+                                    content, content_type = extract_content_from_delta(delta, preserve_reasoning)
+                                    if content and content_type:
+                                        # 如果内容类型变化，需要关闭当前块并开始新块
+                                        if current_block_type != content_type:
+                                            # 关闭之前的块（如果有）
+                                            if current_block_type is not None:
+                                                yield create_anthropic_content_block_stop(block_index).encode('utf-8')
+                                                block_index += 1
+                                            # 开始新块
+                                            yield create_anthropic_content_block_start(block_index, content_type).encode('utf-8')
+                                            current_block_type = content_type
+                                        
+                                        output_tokens += len(content) // 4  # 粗略估计 token
+                                        # 根据内容类型选择 delta 类型
+                                        delta_type = "thinking_delta" if content_type == "thinking" else "text_delta"
+                                        yield create_anthropic_content_block_delta(content, block_index, delta_type).encode('utf-8')
+                    
+                    # 处理剩余 buffer
+                    for line in buffer.split("\n"):
+                        if line.strip():
+                            parsed = parse_openai_sse_chunk(line)
+                            if parsed:
+                                choices = parsed.get("choices", [])
+                                if choices:
+                                    delta = choices[0].get("delta", {})
+                                    content, content_type = extract_content_from_delta(delta, preserve_reasoning)
+                                    if content and content_type:
+                                        # 如果内容类型变化，需要关闭当前块并开始新块
+                                        if current_block_type != content_type:
+                                            # 关闭之前的块（如果有）
+                                            if current_block_type is not None:
+                                                yield create_anthropic_content_block_stop(block_index).encode('utf-8')
+                                                block_index += 1
+                                            # 开始新块
+                                            yield create_anthropic_content_block_start(block_index, content_type).encode('utf-8')
+                                            current_block_type = content_type
+                                        
+                                        output_tokens += len(content) // 4
+                                        delta_type = "thinking_delta" if content_type == "thinking" else "text_delta"
+                                        yield create_anthropic_content_block_delta(content, block_index, delta_type).encode('utf-8')
+                    
+                    # 关闭最后一个内容块（如果有）
+                    if current_block_type is not None:
+                        yield create_anthropic_content_block_stop(block_index).encode('utf-8')
+                    
+                    # 发送结束事件
+                    yield create_anthropic_message_delta("end_turn", output_tokens).encode('utf-8')
+                    yield create_anthropic_message_stop().encode('utf-8')
 
             return StreamingResponse(
-                generate_anthropic_stream(),
+                generate_anthropic_stream_with_lock(),
                 media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",
@@ -1150,7 +1219,10 @@ async def messages_anthropic(request: Request):
             )
         else:
             # 非流式响应 - 转换为 Anthropic 格式
-            openai_result = await proxy.chat_completions(openai_body, stream=False)
+            # 使用锁确保同一时间只有一个上游请求
+            async with _api_request_lock:
+                print(f"[iflow2api] 获取上游非流式响应 (Anthropic)...")
+                openai_result = await proxy.chat_completions(openai_body, stream=False)
             print(f"[iflow2api] 收到 OpenAI 格式响应: {json.dumps(openai_result, ensure_ascii=False)[:300]}")
             anthropic_result = openai_to_anthropic_response(openai_result, mapped_model)
             print(f"[iflow2api] Anthropic 格式响应: id={anthropic_result['id']}, content_length={len(anthropic_result['content'][0]['text'])}")
@@ -1194,16 +1266,30 @@ async def root_post(request: Request):
         proxy = get_proxy()
         
         if stream:
-            async def generate():
-                async for chunk in await proxy.chat_completions(body, stream=True):
-                    yield chunk
+            # 流式响应 - 整个流式传输过程都在锁内进行
+            async def generate_with_lock():
+                """在锁内完成整个流式传输"""
+                async with _api_request_lock:
+                    print(f"[iflow2api] 获取上游流式响应 (root_post)...")
+                    stream_gen = await proxy.chat_completions(body, stream=True)
+                    chunk_count = 0
+                    try:
+                        async for chunk in stream_gen:
+                            chunk_count += 1
+                            yield chunk
+                    finally:
+                        print(f"[iflow2api] 流式完成 (root_post): 共 {chunk_count} chunks")
+            
             return StreamingResponse(
-                generate(),
+                generate_with_lock(),
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
             )
         else:
-            result = await proxy.chat_completions(body, stream=False)
+            # 使用锁确保同一时间只有一个上游请求
+            async with _api_request_lock:
+                print(f"[iflow2api] 获取上游非流式响应 (root_post)...")
+                result = await proxy.chat_completions(body, stream=False)
             # 验证响应包含有效的 choices
             if not result.get("choices"):
                 print(f"[iflow2api] 错误: API 响应缺少 choices 数组 (root_post)")
@@ -1218,6 +1304,70 @@ async def root_post(request: Request):
 async def list_models_compat():
     """Models API - 兼容不带 /v1 前缀的请求"""
     return await list_models()
+
+
+# ============ Anthropic SDK 兼容端点 ============
+
+@app.post(
+    "/api/event_logging/batch",
+    summary="事件日志批量上报 (Anthropic SDK 兼容)",
+    description="处理 Anthropic SDK 的事件日志请求，直接返回成功响应",
+    tags=["Anthropic SDK 兼容"],
+)
+async def event_logging_batch(request: Request):
+    """处理 Anthropic SDK 事件日志请求
+    
+    Anthropic SDK 会发送事件日志到这个端点，
+    我们直接返回成功响应，避免 404 错误。
+    """
+    # 可以选择记录日志或忽略
+    # body = await request.body()
+    # print(f"[iflow2api] 事件日志: {body[:200]}")
+    return {"status": "ok", "logged": True}
+
+
+@app.post(
+    "/v1/messages/count_tokens",
+    summary="Token 计数 (Anthropic SDK 兼容)",
+    description="估算请求的 token 数量",
+    tags=["Anthropic SDK 兼容"],
+)
+async def count_tokens(request: Request):
+    """估算 token 数量
+    
+    Anthropic SDK 会调用此端点估算 token 消耗。
+    由于我们无法精确计算上游模型的 token 数，
+    返回一个估算值。
+    """
+    try:
+        body_bytes = await request.body()
+        body = json.loads(body_bytes.decode("utf-8"))
+        
+        # 简单估算：计算消息文本的字符数，除以 4 得到大致的 token 数
+        messages = body.get("messages", [])
+        system = body.get("system", "")
+        
+        total_chars = len(str(system))
+        for msg in messages:
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        total_chars += len(block.get("text", ""))
+            else:
+                total_chars += len(str(content))
+        
+        # 粗略估算：中文约 1.5 字符/token，英文约 4 字符/token
+        # 取中间值 2.5
+        estimated_tokens = max(1, int(total_chars / 2.5))
+        
+        return {
+            "input_tokens": estimated_tokens
+        }
+    except Exception as e:
+        # 出错时返回一个默认值
+        print(f"[iflow2api] count_tokens 错误: {e}")
+        return {"input_tokens": 100}
 
 
 def main():
