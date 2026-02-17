@@ -38,6 +38,8 @@ Exposes iFlow CLI's AI services as an OpenAI-compatible API.
 
 ## Supported Models
 
+### Text Models
+
 | Model ID               | Name              | Description                       |
 | ---------------------- | ----------------- | --------------------------------- |
 | `glm-4.6`             | GLM-4.6           | Zhipu GLM-4.6                     |
@@ -49,7 +51,14 @@ Exposes iFlow CLI's AI services as an OpenAI-compatible API.
 | `kimi-k2`             | Kimi-K2           | Moonshot Kimi K2                  |
 | `kimi-k2-thinking`    | Kimi-K2-Thinking  | Moonshot Kimi K2 Thinking Model   |
 | `kimi-k2.5`           | Kimi-K2.5         | Moonshot Kimi K2.5                |
+| `kimi-k2-0905`        | Kimi-K2-0905      | Moonshot Kimi K2 0905             |
 | `minimax-m2.5`        | MiniMax-M2.5      | MiniMax M2.5                      |
+
+### Vision Models
+
+| Model ID               | Name              | Description                       |
+| ---------------------- | ----------------- | --------------------------------- |
+| `qwen-vl-max`         | Qwen-VL-Max       | Tongyi Qianwen VL Max Vision Model |
 
 > Model list is sourced from iflow-cli source code and may change with iFlow updates.
 
@@ -364,7 +373,22 @@ iflow2api/
 ├── oauth_login.py       # OAuth login handler
 ├── token_refresher.py   # OAuth token auto-refresh
 ├── settings.py          # Application configuration management
-└── gui.py               # GUI interface
+├── gui.py               # GUI interface
+├── vision.py            # Vision support (image input processing)
+├── tray.py              # System tray
+├── autostart.py         # Auto-start on boot
+├── i18n.py              # Internationalization support
+├── crypto.py            # Configuration encryption
+├── ratelimit.py         # Rate limiting
+├── instances.py         # Multi-instance management
+├── server.py            # Server management
+├── web_server.py        # Web server
+├── updater.py           # Auto-update
+└── admin/               # Web admin interface
+    ├── auth.py          # Admin authentication
+    ├── routes.py        # Admin routes
+    ├── websocket.py     # WebSocket communication
+    └── static/          # Static files (HTML/CSS/JS)
 ```
 
 ## FAQ

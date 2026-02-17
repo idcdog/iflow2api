@@ -252,23 +252,17 @@ class IFlowProxy:
                 "description": "Moonshot Kimi K2.5",
             },
             {
+                "id": "kimi-k2-0905",
+                "name": "Kimi-K2-0905",
+                "description": "Moonshot Kimi K2 0905",
+            },
+            {
                 "id": "minimax-m2.5",
                 "name": "MiniMax-M2.5",
                 "description": "MiniMax M2.5",
             },
             # 视觉模型（推荐用于图像处理）
-            {"id": "glm-4v", "name": "GLM-4V", "description": "智谱 GLM-4V 视觉模型"},
-            {"id": "glm-4v-plus", "name": "GLM-4V-Plus", "description": "智谱 GLM-4V-Plus 视觉模型"},
-            {"id": "glm-4v-flash", "name": "GLM-4V-Flash", "description": "智谱 GLM-4V-Flash 视觉模型 (免费)"},
-            {"id": "glm-4.5v", "name": "GLM-4.5V", "description": "智谱 GLM-4.5V 视觉模型"},
-            {"id": "glm-4.6v", "name": "GLM-4.6V", "description": "智谱 GLM-4.6V 视觉模型"},
-            {"id": "moonshot-v1-8k-vision", "name": "Kimi Vision 8K", "description": "Kimi 视觉模型 8K"},
-            {"id": "moonshot-v1-32k-vision", "name": "Kimi Vision 32K", "description": "Kimi 视觉模型 32K"},
-            {"id": "moonshot-v1-128k-vision", "name": "Kimi Vision 128K", "description": "Kimi 视觉模型 128K"},
-            {"id": "qwen-vl-plus", "name": "Qwen-VL-Plus", "description": "通义千问 VL Plus 视觉模型"},
             {"id": "qwen-vl-max", "name": "Qwen-VL-Max", "description": "通义千问 VL Max 视觉模型"},
-            {"id": "qwen2.5-vl", "name": "Qwen2.5-VL", "description": "通义千问 Qwen2.5 VL 视觉模型"},
-            {"id": "qwen3-vl", "name": "Qwen3-VL", "description": "通义千问 Qwen3 VL 视觉模型"},
         ]
 
         import time

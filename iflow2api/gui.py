@@ -195,27 +195,52 @@ class IFlow2ApiApp:
 
     def _quit_app(self):
         """退出应用"""
+        # 标记为正在退出
+        if getattr(self, "_is_quitting_process", False):
+            return
+        self._is_quitting_process = True
         self._is_quitting = True
-        self.server.stop()
+        
+        # 停止服务和托盘
+        if hasattr(self, "server"):
+            self.server.stop()
         if self.tray:
             self.tray.stop()
+            
         try:
+            # 尝试正常关闭窗口
             self.page.window.prevent_close = False
             self.page.update()
-            # destroy() 在 Flet 0.80 中是异步方法，使用 asyncio 调度
-            import asyncio
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    loop.create_task(self.page.window.destroy())
-                else:
-                    loop.run_until_complete(self.page.window.destroy())
-            except Exception:
-                # 如果 asyncio 调度失败，尝试直接调用
-                # Flet 内部可能会自动处理 async 转同步
-                self.page.window.destroy()
+            
+            # 定义销毁窗口的异步函数
+            async def destroy_window():
+                try:
+                    await self.page.window.destroy()
+                except Exception:
+                    # 如果销毁失败（例如 session 已关闭），强制退出进程
+                    pass
+                finally:
+                    # 确保进程退出
+                    import os
+                    os._exit(0)
+
+            # 执行销毁
+            if hasattr(self.page, "run_task"):
+                self.page.run_task(destroy_window)
+            else:
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        loop.create_task(destroy_window())
+                    else:
+                        loop.run_until_complete(destroy_window())
+                except RuntimeError:
+                    asyncio.run(destroy_window())
+                    
         except Exception:
-            pass
+            # 发生任何其他错误，强制退出
+            import os
+            os._exit(0)
 
     def _build_ui(self):
         """构建 UI"""

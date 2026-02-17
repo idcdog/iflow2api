@@ -6,9 +6,7 @@
 - OpenAI 和 Anthropic 格式兼容
 
 支持的视觉模型：
-- GLM-4.5V, GLM-4.6V (智谱)
-- moonshot-v1-vision-preview (Kimi)
-- Qwen-VL 系列
+- Qwen-VL-Max (通义千问)
 """
 
 import base64
@@ -20,25 +18,12 @@ from dataclasses import dataclass
 
 # 支持视觉功能的模型列表
 VISION_MODELS = {
-    # 智谱 GLM 视觉模型
-    "glm-4v": {"name": "GLM-4V", "provider": "zhipu", "max_images": 10},
-    "glm-4v-plus": {"name": "GLM-4V-Plus", "provider": "zhipu", "max_images": 10},
-    "glm-4v-flash": {"name": "GLM-4V-Flash", "provider": "zhipu", "max_images": 10},
-    "glm-4.5v": {"name": "GLM-4.5V", "provider": "zhipu", "max_images": 10},
-    "glm-4.6v": {"name": "GLM-4.6V", "provider": "zhipu", "max_images": 10},
-    # Kimi 视觉模型
-    "moonshot-v1-8k-vision": {"name": "Kimi Vision 8K", "provider": "moonshot", "max_images": 5},
-    "moonshot-v1-32k-vision": {"name": "Kimi Vision 32K", "provider": "moonshot", "max_images": 5},
-    "moonshot-v1-128k-vision": {"name": "Kimi Vision 128K", "provider": "moonshot", "max_images": 5},
     # Qwen 视觉模型
-    "qwen-vl-plus": {"name": "Qwen-VL-Plus", "provider": "alibaba", "max_images": 10},
     "qwen-vl-max": {"name": "Qwen-VL-Max", "provider": "alibaba", "max_images": 10},
-    "qwen2.5-vl": {"name": "Qwen2.5-VL", "provider": "alibaba", "max_images": 10},
-    "qwen3-vl": {"name": "Qwen3-VL", "provider": "alibaba", "max_images": 10},
 }
 
 # 默认视觉模型（当请求包含图像但模型不支持时回退）
-DEFAULT_VISION_MODEL = "glm-4.6v"
+DEFAULT_VISION_MODEL = "qwen-vl-max"
 
 
 @dataclass

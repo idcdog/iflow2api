@@ -38,6 +38,8 @@
 
 ## 支持的模型
 
+### 文本模型
+
 | 模型 ID                | 名称              | 说明                      |
 | ---------------------- | ----------------- | ------------------------- |
 | `glm-4.6`             | GLM-4.6           | 智谱 GLM-4.6              |
@@ -49,7 +51,14 @@
 | `kimi-k2`             | Kimi-K2           | Moonshot Kimi K2          |
 | `kimi-k2-thinking`    | Kimi-K2-Thinking  | Moonshot Kimi K2 思考模型 |
 | `kimi-k2.5`           | Kimi-K2.5         | Moonshot Kimi K2.5        |
+| `kimi-k2-0905`        | Kimi-K2-0905      | Moonshot Kimi K2 0905     |
 | `minimax-m2.5`        | MiniMax-M2.5      | MiniMax M2.5              |
+
+### 视觉模型
+
+| 模型 ID                | 名称              | 说明                      |
+| ---------------------- | ----------------- | ------------------------- |
+| `qwen-vl-max`         | Qwen-VL-Max       | 通义千问 VL Max 视觉模型  |
 
 > 模型列表来源于 iflow-cli 源码，可能随 iFlow 更新而变化。
 
@@ -363,7 +372,22 @@ iflow2api/
 ├── oauth_login.py       # OAuth 登录处理器
 ├── token_refresher.py   # OAuth token 自动刷新
 ├── settings.py          # 应用配置管理
-└── gui.py               # GUI 界面
+├── gui.py               # GUI 界面
+├── vision.py            # Vision 支持 (图像输入处理)
+├── tray.py              # 系统托盘
+├── autostart.py         # 开机自启动
+├── i18n.py              # 国际化支持
+├── crypto.py            # 配置加密
+├── ratelimit.py         # 速率限制
+├── instances.py         # 多实例管理
+├── server.py            # 服务器管理
+├── web_server.py        # Web 服务器
+├── updater.py           # 自动更新
+└── admin/               # Web 管理界面
+    ├── auth.py          # 管理界面认证
+    ├── routes.py        # 管理界面路由
+    ├── websocket.py     # WebSocket 通信
+    └── static/          # 静态文件 (HTML/CSS/JS)
 ```
 
 ## 常见问题

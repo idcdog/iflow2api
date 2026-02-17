@@ -48,7 +48,7 @@ class SettingsUpdate(BaseModel):
     port: Optional[int] = None
     auto_start: Optional[bool] = None
     start_minimized: Optional[bool] = None
-    minimize_to_tray: Optional[bool] = None
+    close_action: Optional[str] = None  # 关闭按钮行为: exit, minimize_to_tray, minimize_to_taskbar
     auto_run_server: Optional[bool] = None
     theme_mode: Optional[str] = None
     rate_limit_enabled: Optional[bool] = None
@@ -330,7 +330,7 @@ async def get_settings(username: str = Depends(get_current_user)) -> dict[str, A
         "port": settings.port,
         "auto_start": settings.auto_start,
         "start_minimized": settings.start_minimized,
-        "minimize_to_tray": settings.minimize_to_tray,
+        "close_action": settings.close_action,
         "auto_run_server": settings.auto_run_server,
         "theme_mode": settings.theme_mode,
         "rate_limit_enabled": settings.rate_limit_enabled,
@@ -365,8 +365,8 @@ async def update_settings(
         set_auto_start(request.auto_start)
     if request.start_minimized is not None:
         settings.start_minimized = request.start_minimized
-    if request.minimize_to_tray is not None:
-        settings.minimize_to_tray = request.minimize_to_tray
+    if request.close_action is not None:
+        settings.close_action = request.close_action
     if request.auto_run_server is not None:
         settings.auto_run_server = request.auto_run_server
     if request.theme_mode is not None:
