@@ -4,6 +4,7 @@ import sys
 import json
 import uuid
 import asyncio
+import time
 from contextlib import asynccontextmanager
 from typing import Any, Optional
 
@@ -27,6 +28,7 @@ from .vision import (
     get_max_images,
     DEFAULT_VISION_MODEL,
 )
+from .version import get_version, get_startup_info, get_diagnostic_info, is_docker
 
 
 # ============ Anthropic 格式转换函数 ============
@@ -479,6 +481,9 @@ def update_proxy_token(token_data: dict):
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     global _refresher, _proxy, _rate_limiter
+    # 启动时打印版本和系统信息
+    print(get_startup_info())
+    
     # 启动时检查配置
     try:
         config = load_iflow_config()
@@ -564,8 +569,8 @@ app = FastAPI(
 2. 启动服务: `iflow2api` 或通过 GUI 启动
 3. 配置客户端使用 `http://localhost:28000/v1` 作为 API 端点
 """,
-    version="0.3.0",
-    lifespan=lifespan,
+version=get_version(),
+lifespan=lifespan,
     redirect_slashes=True,  # 自动处理末尾斜杠
     docs_url="/docs",  # Swagger UI
     redoc_url="/redoc",  # ReDoc
@@ -676,15 +681,38 @@ except ImportError as e:
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    """记录请求信息"""
-    print(f"[iflow2api] Request: {request.method} {request.url.path}")
+    """记录请求信息，包括请求体大小和响应时间"""
+    start_time = time.time()
+    
+    # 获取请求体大小（仅对 POST/PUT/PATCH 请求）
+    body_size = 0
+    if request.method in ("POST", "PUT", "PATCH"):
+        content_length = request.headers.get("content-length")
+        if content_length:
+            body_size = int(content_length)
+    
+    # 格式化请求体大小
+    def format_size(size: int) -> str:
+        if size < 1024:
+            return f"{size}B"
+        elif size < 1024 * 1024:
+            return f"{size/1024:.1f}KB"
+        else:
+            return f"{size/1024/1024:.1f}MB"
+    
+    print(f"[iflow2api] Request: {request.method} {request.url.path}" +
+          (f" ({format_size(body_size)})" if body_size > 0 else ""))
+    
     if request.method == "OPTIONS":
         # 显式处理 OPTIONS 请求以确保 CORS 正常
         response = await call_next(request)
         return response
     
     response = await call_next(request)
-    print(f"[iflow2api] Response: {response.status_code}")
+    
+    # 计算响应时间
+    elapsed_ms = (time.time() - start_time) * 1000
+    print(f"[iflow2api] Response: {response.status_code} ({elapsed_ms:.0f}ms)")
     
     # 如果返回 405，打印更多调试信息
     if response.status_code == 405:
@@ -763,7 +791,7 @@ async def root():
     """根路径"""
     return {
         "service": "iflow2api",
-        "version": "0.3.0",
+        "version": get_version(),
         "description": "iFlow CLI AI 服务 → OpenAI 兼容 API",
         "endpoints": {
             "models": "/v1/models",
@@ -786,9 +814,19 @@ async def root():
 async def health():
     """健康检查"""
     is_logged_in = check_iflow_login()
+    diagnostic = get_diagnostic_info()
     return {
         "status": "healthy" if is_logged_in else "degraded",
         "iflow_logged_in": is_logged_in,
+        "version": diagnostic["version"],
+        "os": diagnostic["os"],
+        "platform": diagnostic["platform"]["system"],
+        "architecture": diagnostic["platform"]["architecture"],
+        "python": diagnostic["platform"]["python_version"],
+        "runtime": diagnostic["runtime"],
+        "docker": diagnostic["docker"],
+        "kubernetes": diagnostic["kubernetes"],
+        "wsl": diagnostic["wsl"],
     }
 
 
@@ -1445,9 +1483,8 @@ def main():
     # 加载配置
     settings = load_settings()
 
-    print("=" * 50)
-    print("  iflow2api - iFlow CLI AI 服务代理")
-    print("=" * 50)
+    # 打印启动信息
+    print(get_startup_info())
     print(f"  监听地址: {settings.host}:{settings.port}")
     print()
 
