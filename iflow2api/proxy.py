@@ -60,7 +60,8 @@ class IFlowProxy:
         - conversation-id: 对话ID
         - x-iflow-signature: HMAC-SHA256 签名
         - x-iflow-timestamp: 时间戳(毫秒)
-        - installation-id: 安装ID
+        
+        注意: iFlow CLI 不使用 installation-id 请求头，移除以保持兼容
         
         Args:
             stream: 是否流式请求，流式请求时不设置 Accept 头以避免上游返回 JSON
@@ -79,9 +80,8 @@ class IFlowProxy:
         if not stream:
             headers["Accept"] = "application/json"
         
-        # 添加 installation-id
-        if self.config.installation_id:
-            headers["installation-id"] = self.config.installation_id
+        # 注意: iFlow CLI 不使用 installation-id 请求头
+        # 移除以保持与上游 API 兼容
         
         # 添加签名
         signature = generate_signature(
@@ -197,6 +197,125 @@ class IFlowProxy:
         
         return chunk_data
 
+    @staticmethod
+    def _configure_model_request(request_body: dict, model: str) -> dict:
+        """
+        为特定模型配置必要的请求参数
+        
+        来源: iFlow CLI 源码中的模型配置 (iflow.js)
+        
+        模型配置规则:
+        - deepseek: thinking_mode=True, reasoning=True
+        - glm-4.7: chat_template_kwargs={enable_thinking: True}
+        - glm-5: chat_template_kwargs={enable_thinking: True}, enable_thinking=True, thinking={type: "enabled"}
+        - glm-* (其他): chat_template_kwargs={enable_thinking: True}
+        - kimi-k2.5: thinking={type: "enabled"}
+        - *thinking*: thinking_mode=True
+        - mimo-*: thinking={type: "enabled"}
+        - claude: chat_template_kwargs={enable_thinking: True}
+        - sonnet-*: chat_template_kwargs={enable_thinking: True}
+        - *reasoning*: reasoning=True
+        - qwen*4b: 删除 thinking_mode, reasoning, chat_template_kwargs (不支持思考)
+        
+        Args:
+            request_body: 原始请求体
+            model: 模型 ID
+            
+        Returns:
+            配置后的请求体（副本）
+        """
+        import re
+        
+        # 创建请求体副本，避免修改原始请求
+        body = request_body.copy()
+        model_lower = model.lower()
+        
+        # 1. DeepSeek 模型
+        # configureRequest:(e,r)=>{r.reasoningLevel!=="low"&&(e.reasoning=!0),e.thinking_mode=!0}
+        if model_lower.startswith("deepseek"):
+            if "thinking_mode" not in body:
+                body["thinking_mode"] = True
+            if "reasoning" not in body:
+                body["reasoning"] = True
+            print(f"[iflow2api] 为模型 {model} 添加思考参数: thinking_mode=True, reasoning=True")
+        
+        # 2. GLM-5 模型 (特殊配置)
+        # configureRequest:e=>{e.chat_template_kwargs={enable_thinking:!0},e.enable_thinking=!0,e.thinking={type:"enabled"}}
+        elif model == "glm-5":
+            if "chat_template_kwargs" not in body:
+                body["chat_template_kwargs"] = {"enable_thinking": True}
+            if "enable_thinking" not in body:
+                body["enable_thinking"] = True
+            if "thinking" not in body:
+                body["thinking"] = {"type": "enabled"}
+            print(f"[iflow2api] 为模型 {model} 添加思考参数: chat_template_kwargs, enable_thinking, thinking")
+        
+        # 3. GLM-4.7 模型
+        # configureRequest:e=>{e.chat_template_kwargs={enable_thinking:!0}}
+        elif model == "glm-4.7":
+            if "chat_template_kwargs" not in body:
+                body["chat_template_kwargs"] = {"enable_thinking": True}
+            print(f"[iflow2api] 为模型 {model} 添加思考参数: chat_template_kwargs")
+        
+        # 4. 其他 GLM 模型
+        # configureRequest:e=>{e.chat_template_kwargs={enable_thinking:!0}}
+        elif model_lower.startswith("glm-"):
+            if "chat_template_kwargs" not in body:
+                body["chat_template_kwargs"] = {"enable_thinking": True}
+            print(f"[iflow2api] 为模型 {model} 添加思考参数: chat_template_kwargs")
+        
+        # 5. Kimi-K2.5 模型
+        # configureRequest:(e,r)=>{e.thinking={type:"enabled"}}
+        elif model_lower.startswith("kimi-k2.5"):
+            if "thinking" not in body:
+                body["thinking"] = {"type": "enabled"}
+            print(f"[iflow2api] 为模型 {model} 添加思考参数: thinking")
+        
+        # 6. 包含 "thinking" 的模型 (如 kimi-k2-thinking, gemini-2.0-flash-thinking)
+        # configureRequest:e=>{e.thinking_mode=!0}
+        elif "thinking" in model_lower:
+            if "thinking_mode" not in body:
+                body["thinking_mode"] = True
+            print(f"[iflow2api] 为模型 {model} 添加思考参数: thinking_mode")
+        
+        # 7. mimo- 模型
+        # configureRequest:e=>{e.thinking={type:"enabled"}}
+        elif model_lower.startswith("mimo-"):
+            if "thinking" not in body:
+                body["thinking"] = {"type": "enabled"}
+            print(f"[iflow2api] 为模型 {model} 添加思考参数: thinking")
+        
+        # 8. Claude 模型
+        # configureRequest:e=>{e.chat_template_kwargs={enable_thinking:!0}}
+        elif "claude" in model_lower:
+            if "chat_template_kwargs" not in body:
+                body["chat_template_kwargs"] = {"enable_thinking": True}
+            print(f"[iflow2api] 为模型 {model} 添加思考参数: chat_template_kwargs")
+        
+        # 9. sonnet- 模型
+        # configureRequest:e=>{e.chat_template_kwargs={enable_thinking:!0}}
+        elif "sonnet-" in model_lower:
+            if "chat_template_kwargs" not in body:
+                body["chat_template_kwargs"] = {"enable_thinking": True}
+            print(f"[iflow2api] 为模型 {model} 添加思考参数: chat_template_kwargs")
+        
+        # 10. 包含 "reasoning" 的模型
+        # configureRequest:e=>{e.reasoning=!0}
+        elif "reasoning" in model_lower:
+            if "reasoning" not in body:
+                body["reasoning"] = True
+            print(f"[iflow2api] 为模型 {model} 添加思考参数: reasoning")
+        
+        # 11. Qwen 4B 模型 (不支持思考，需要删除相关参数)
+        # configureRequest:e=>{delete e.thinking_mode,delete e.reasoning,delete e.chat_template_kwargs}
+        if re.match(r'qwen.*4b', model_lower, re.IGNORECASE):
+            for key in ["thinking_mode", "reasoning", "chat_template_kwargs"]:
+                if key in body:
+                    del body[key]
+            print(f"[iflow2api] 为模型 {model} 移除思考参数 (不支持)")
+        
+        return body
+
     async def close(self):
         """关闭 HTTP 客户端"""
         if self._client and not self._client.is_closed:
@@ -309,6 +428,12 @@ class IFlowProxy:
         from .settings import load_settings
         settings = load_settings()
         preserve_reasoning = settings.preserve_reasoning_content
+        
+        # 为特定模型添加必要的请求参数
+        # 来源: iFlow CLI 源码中的模型配置
+        # GLM-5 等思考模型需要 enable_thinking 参数才能正常工作
+        model = request_body.get("model", "")
+        request_body = self._configure_model_request(request_body, model)
 
         if stream:
             # 对于流式请求，使用 httpx 的 stream 方法实现真正的流式传输
@@ -316,11 +441,18 @@ class IFlowProxy:
             async def stream_generator():
                 buffer = b""
                 chunk_count = 0
+                headers = self._get_headers(stream=True)
+                
+                # 调试：打印请求详情
+                print(f"[iflow2api] 流式请求 URL: {self.base_url}/chat/completions")
+                print(f"[iflow2api] 流式请求头: {json.dumps({k: v for k, v in headers.items() if k != 'Authorization'}, ensure_ascii=False)}")
+                print(f"[iflow2api] 流式请求体: model={request_body.get('model')}, messages={len(request_body.get('messages', []))}, tools={len(request_body.get('tools', [])) if 'tools' in request_body else 0}")
+                
                 try:
                     async with client.stream(
                         "POST",
                         f"{self.base_url}/chat/completions",
-                        headers=self._get_headers(stream=True),
+                        headers=headers,
                         json=request_body,
                         timeout=httpx.Timeout(300.0, connect=10.0),
                     ) as response:
