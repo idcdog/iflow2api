@@ -1,11 +1,14 @@
 """iFlow 配置读取器 - 从 ~/.iflow/settings.json 读取认证信息"""
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Optional
 from pydantic import BaseModel, Field
 from datetime import datetime
+
+logger = logging.getLogger("iflow2api")
 
 
 class IFlowConfig(BaseModel):
@@ -74,9 +77,9 @@ def load_iflow_config() -> IFlowConfig:
     if auth_type not in ("oauth-iflow", "api-key"):
         # 也支持 openai-compatible 模式，但会给出警告
         if auth_type == "openai-compatible":
-            print(f"[警告] 当前使用 openai-compatible 模式，部分模型可能不可用")
+            logger.warning("当前使用 openai-compatible 模式，部分模型可能不可用")
         elif auth_type:
-            print(f"[警告] 未知的认证类型: {auth_type}")
+            logger.warning("未知的认证类型: %s", auth_type)
 
     # 获取 API Key
     api_key = data.get("apiKey") or data.get("searchApiKey")
@@ -134,6 +137,8 @@ def save_iflow_config(config: IFlowConfig) -> None:
     """
     保存 iFlow 配置到 ~/.iflow/settings.json
 
+    仅更新已知字段，保留文件中原有的未知字段（M-03 修复）
+
     Args:
         config: IFlowConfig 配置对象
     """
@@ -141,26 +146,32 @@ def save_iflow_config(config: IFlowConfig) -> None:
     config_dir = config_path.parent
     config_dir.mkdir(parents=True, exist_ok=True)
 
-    # 转换为字典
-    data = {
-        "apiKey": config.api_key,
-        "baseUrl": config.base_url,
-    }
+    # 先读取现有数据，保留未知字段（M-03 修复）
+    existing_data: dict = {}
+    if config_path.exists():
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                existing_data = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            existing_data = {}
 
-    # 添加可选字段
-    if config.model_name:
-        data["modelName"] = config.model_name
-    if config.cna:
-        data["cna"] = config.cna
-    if config.auth_type:
-        data["selectedAuthType"] = config.auth_type
-    if config.oauth_access_token:
-        data["oauth_access_token"] = config.oauth_access_token
-    if config.oauth_refresh_token:
-        data["oauth_refresh_token"] = config.oauth_refresh_token
-    if config.oauth_expires_at:
-        data["oauth_expires_at"] = config.oauth_expires_at.isoformat()
+    # 仅覆盖已知字段
+    existing_data["apiKey"] = config.api_key
+    existing_data["baseUrl"] = config.base_url
+
+    if config.model_name is not None:
+        existing_data["modelName"] = config.model_name
+    if config.cna is not None:
+        existing_data["cna"] = config.cna
+    if config.auth_type is not None:
+        existing_data["selectedAuthType"] = config.auth_type
+    if config.oauth_access_token is not None:
+        existing_data["oauth_access_token"] = config.oauth_access_token
+    if config.oauth_refresh_token is not None:
+        existing_data["oauth_refresh_token"] = config.oauth_refresh_token
+    if config.oauth_expires_at is not None:
+        existing_data["oauth_expires_at"] = config.oauth_expires_at.isoformat()
 
     # 保存到文件
     with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+        json.dump(existing_data, f, indent=2, ensure_ascii=False)

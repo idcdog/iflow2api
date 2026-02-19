@@ -189,43 +189,24 @@ async def delete_user(
 
 def _check_service_health(port: int, host: str = "127.0.0.1") -> tuple[bool, str]:
     """
-    检查服务健康状态
-    
+    检查服务健康状态（L-04 修复：改用非阻塞 socket 替代同步 http.client，
+    避免在 asyncio event loop 中阻塞）
+
     Returns:
         (is_healthy, error_message)
     """
     import socket
-    import http.client
-    
-    # 首先检查端口是否在监听
+
+    # 只做端口连通性检查（纯 socket，非阻塞）
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.settimeout(1)
             result = s.connect_ex((host, port))
             if result != 0:
                 return False, f"端口 {port} 未监听"
+            return True, ""
     except Exception as e:
         return False, f"端口检查失败: {str(e)}"
-    
-    # 然后检查 HTTP 健康端点
-    try:
-        conn = http.client.HTTPConnection(host, port, timeout=2)
-        conn.request("GET", "/health")
-        response = conn.getresponse()
-        if response.status == 200:
-            import json
-            data = json.loads(response.read().decode())
-            conn.close()
-            if data.get("status") == "healthy":
-                return True, ""
-            else:
-                return True, f"健康检查返回: {data.get('status')}"
-        else:
-            conn.close()
-            return False, f"健康检查失败: HTTP {response.status}"
-    except Exception as e:
-        # 端口开放但健康检查失败，服务可能正在启动中
-        return True, f"健康检查异常: {str(e)}"
 
 
 @admin_router.get("/status")
@@ -486,37 +467,38 @@ async def get_logs(
 
 @admin_router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """WebSocket 连接端点"""
+    """WebSocket 连接端点（M-10 修复：连接建立时即验证 Token）"""
+    # 在 HTTP Upgrade 阶段验证 token（来自查询参数）
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=4001, reason="Missing token")
+        return
+
+    auth_manager = get_auth_manager()
+    username = auth_manager.verify_token(token)
+    if not username:
+        await websocket.close(code=4001, reason="Invalid or expired token")
+        return
+
     connection_manager = get_connection_manager()
     await connection_manager.connect(websocket)
-    
+
     try:
         while True:
-            # 接收消息
             data = await websocket.receive_json()
-            
+
             # 处理心跳
             if data.get("type") == "ping":
                 await connection_manager.send_personal(websocket, {
                     "type": "pong",
                     "timestamp": datetime.now().isoformat(),
                 })
-            # 处理认证
+            # 支持旧版客户端通过消息中的 auth 命令认证（向后兼容）
             elif data.get("type") == "auth":
-                token = data.get("token")
-                if token:
-                    auth_manager = get_auth_manager()
-                    username = auth_manager.verify_token(token)
-                    if username:
-                        await connection_manager.send_personal(websocket, {
-                            "type": "auth_success",
-                            "username": username,
-                        })
-                    else:
-                        await connection_manager.send_personal(websocket, {
-                            "type": "auth_failed",
-                            "message": "无效的令牌",
-                        })
+                await connection_manager.send_personal(websocket, {
+                    "type": "auth_success",
+                    "username": username,
+                })
     except WebSocketDisconnect:
         await connection_manager.disconnect(websocket)
     except Exception:

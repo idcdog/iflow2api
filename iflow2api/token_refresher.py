@@ -1,9 +1,12 @@
 """OAuth token 自动刷新后台任务"""
 
 import asyncio
+import logging
 import threading
 from datetime import datetime, timedelta
 from typing import Optional, Callable
+
+logger = logging.getLogger("iflow2api")
 
 from .oauth import IFlowOAuth
 from .config import load_iflow_config, save_iflow_config, IFlowConfig
@@ -15,7 +18,7 @@ class OAuthTokenRefresher:
     def __init__(
         self,
         check_interval: int = 3600,  # 每小时检查一次
-        refresh_buffer: int = 300,  # 提前 5 分钟刷新
+        refresh_buffer: int = 300,   # 提前 5 分钟刷新
     ):
         """
         初始化 token 刷新器
@@ -30,6 +33,8 @@ class OAuthTokenRefresher:
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._on_refresh_callback: Optional[Callable] = None
+        # 保存主事件循环引用，用于在后台线程中提交 coroutine（M-05 修复）
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     def set_refresh_callback(self, callback: Callable[[dict], None]):
         """
@@ -41,9 +46,15 @@ class OAuthTokenRefresher:
         self._on_refresh_callback = callback
 
     def start(self):
-        """启动 token 刷新后台任务"""
+        """启动 token 刷新后台任务，捕获当前事件循环引用（M-05 修复）"""
         if self._running:
             return
+
+        # 在 FastAPI lifespan（asyncio 上下文）中调用时捕获当前循环
+        try:
+            self._loop = asyncio.get_event_loop()
+        except RuntimeError:
+            self._loop = None
 
         self._running = True
         self._stop_event.clear()
@@ -66,7 +77,6 @@ class OAuthTokenRefresher:
         """运行刷新循环（在后台线程中）"""
         while not self._stop_event.is_set():
             try:
-                # 检查是否需要刷新
                 config = load_iflow_config()
 
                 if (
@@ -74,20 +84,35 @@ class OAuthTokenRefresher:
                     and config.oauth_refresh_token
                     and config.oauth_expires_at
                 ):
-                    # 检查是否需要刷新
                     oauth = IFlowOAuth()
-                    if oauth.is_token_expired(
-                        config.oauth_expires_at, self.refresh_buffer
-                    ):
-                        # 需要刷新 token
-                        asyncio.run(self._refresh_token(config))
+                    if oauth.is_token_expired(config.oauth_expires_at, self.refresh_buffer):
+                        self._schedule_refresh(config)
 
             except Exception:
-                # 忽略错误，继续下一次检查
                 pass
 
-            # 等待下一次检查
             self._stop_event.wait(self.check_interval)
+
+    def _schedule_refresh(self, config: IFlowConfig) -> None:
+        """
+        安排 token 刷新任务（M-05 修复）
+
+        优先使用 run_coroutine_threadsafe 注入主事件循环，
+        避免在主进程中重复创建事件循环引发资源冲突。
+        如果没有可用的主循环，则回退到 asyncio.run()。
+        """
+        coro = self._refresh_token(config)
+
+        if self._loop and self._loop.is_running():
+            # 在主事件循环中运行，避免创建新循环
+            future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+            try:
+                future.result(timeout=30)  # 最多等待 30 秒
+            except Exception:
+                pass
+        else:
+            # 回退：创建临时隔离事件循环（仅后台线程使用）
+            asyncio.run(coro)
 
     async def _refresh_token(self, config: IFlowConfig):
         """
@@ -96,10 +121,8 @@ class OAuthTokenRefresher:
         Args:
             config: 当前 iFlow 配置
         """
+        oauth = IFlowOAuth()
         try:
-            oauth = IFlowOAuth()
-
-            # 刷新 token
             if not config.oauth_refresh_token:
                 return
             token_data = await oauth.refresh_token(config.oauth_refresh_token)
@@ -118,15 +141,10 @@ class OAuthTokenRefresher:
             if self._on_refresh_callback:
                 self._on_refresh_callback(token_data)
 
+        except Exception as e:
+            logger.warning("Token 刷新失败: %s", e)
+        finally:
             await oauth.close()
-
-        except Exception:
-            # 刷新失败，记录错误
-            try:
-                oauth = IFlowOAuth()
-                await oauth.close()
-            except Exception:
-                pass
 
     def is_running(self) -> bool:
         """

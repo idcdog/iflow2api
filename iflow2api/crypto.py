@@ -3,9 +3,12 @@
 import base64
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any, Optional
+
+logger = logging.getLogger("iflow2api")
 
 # 尝试导入加密库
 try:
@@ -34,8 +37,7 @@ class ConfigEncryption:
         self._key_path = Path.home() / ".iflow2api" / ".key"
 
         if not HAS_CRYPTOGRAPHY:
-            print("[iflow2api] 警告: cryptography 库未安装，配置加密功能不可用")
-            print("[iflow2api] 提示: 运行 'pip install cryptography' 启用加密功能")
+            logger.warning("cryptography 库未安装，配置加密功能不可用；运行 'pip install cryptography' 启用加密")
             return
 
         if key:
@@ -44,22 +46,24 @@ class ConfigEncryption:
             self._load_or_generate_key()
 
     def _load_or_generate_key(self) -> None:
-        """加载或生成密钥"""
+        """加载或生成密钥（M-06 修复：不再对 Fernet key 做额外 base64 编码）"""
         if self._key_path.exists():
             try:
-                self._key = base64.urlsafe_b64decode(self._key_path.read_bytes())
+                # Fernet.generate_key() 返回的本身就是 url-safe base64 bytes
+                # 直接读取文件内容即为 Fernet key
+                self._key = self._key_path.read_bytes().strip()
                 self._fernet = Fernet(self._key)
                 return
             except Exception as e:
-                print(f"[iflow2api] 警告: 加载密钥失败: {e}")
+                logger.warning("加载密鑙失败: %s", e)
 
-        # 生成新密钥
+        # 生成新密钥（已是 url-safe base64 bytes，直接存储）
         self._key = Fernet.generate_key()
         self._fernet = Fernet(self._key)
 
         # 保存密钥
         self._key_path.parent.mkdir(parents=True, exist_ok=True)
-        self._key_path.write_bytes(base64.urlsafe_b64encode(self._key))
+        self._key_path.write_bytes(self._key)
 
         # 设置权限（仅所有者可读写）
         try:
@@ -200,7 +204,7 @@ class ConfigEncryption:
 
                 return True
         except Exception as e:
-            print(f"[iflow2api] 密钥轮换失败: {e}")
+            logger.error("密鑙轮换失败: %s", e)
 
         return False
 
@@ -268,7 +272,7 @@ class SecureConfig:
             self._cache = data
             return data
         except Exception as e:
-            print(f"[iflow2api] 加载配置失败: {e}")
+            logger.error("加载配置失败: %s", e)
             return {}
 
     def save(self, data: dict) -> bool:
@@ -300,7 +304,7 @@ class SecureConfig:
             self._cache = data
             return True
         except Exception as e:
-            print(f"[iflow2api] 保存配置失败: {e}")
+            logger.error("保存配置失败: %s", e)
             return False
 
     def get(self, key: str, default: Any = None) -> Any:

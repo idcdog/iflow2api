@@ -9,12 +9,10 @@ from typing import Optional, Callable, Dict, Any
 
 
 class OAuthCallbackHandler(BaseHTTPRequestHandler):
-    """OAuth 回调请求处理器"""
+    """OAuth 回调请求处理器
 
-    # 存储回调数据
-    auth_code: Optional[str] = None
-    error: Optional[str] = None
-    state: Optional[str] = None
+    回调数据通过实例引用共享的 server 对象（H-06 修复：不再使用类变量，消除并发竞态）
+    """
 
     def log_message(self, format: str, *args: Any) -> None:
         """禁用默认日志输出"""
@@ -31,10 +29,10 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
         error = query.get("error", [None])[0]
         state = query.get("state", [None])[0]
 
-        # 保存回调数据
-        OAuthCallbackHandler.auth_code = code
-        OAuthCallbackHandler.error = error
-        OAuthCallbackHandler.state = state
+        # 将数据写入 server 实例，而非类变量
+        self.server.callback_code = code      # type: ignore[attr-defined]
+        self.server.callback_error = error    # type: ignore[attr-defined]
+        self.server.callback_state = state    # type: ignore[attr-defined]
 
         # 返回响应
         if code:
@@ -230,13 +228,12 @@ class OAuthCallbackServer:
             return False
 
         try:
-            # 重置回调数据
-            OAuthCallbackHandler.auth_code = None
-            OAuthCallbackHandler.error = None
-            OAuthCallbackHandler.state = None
-
             # 创建服务器
             self._server = HTTPServer((self.host, self.port), OAuthCallbackHandler)
+            # 实例级回调数据（H-06 修复：不再使用类变量）
+            self._server.callback_code = None   # type: ignore[attr-defined]
+            self._server.callback_error = None  # type: ignore[attr-defined]
+            self._server.callback_state = None  # type: ignore[attr-defined]
 
             # 启动服务器线程
             self._thread = threading.Thread(target=self._run_server, daemon=True)
@@ -269,7 +266,7 @@ class OAuthCallbackServer:
         self,
         timeout: int = 60,
         callback: Optional[Callable[[Optional[str], Optional[str]], None]] = None,
-    ) -> tuple[Optional[str], Optional[str]]:
+    ) -> tuple[Optional[str], Optional[str], Optional[str]]:
         """
         等待 OAuth 回调
 
@@ -278,30 +275,27 @@ class OAuthCallbackServer:
             callback: 回调函数，接收 (code, error) 参数
 
         Returns:
-            (auth_code, error) 元组
+            (auth_code, error, state) 三元组，state 供调用方做 CSRF 校验
         """
         start_time = time.time()
 
         while time.time() - start_time < timeout:
-            if (
-                OAuthCallbackHandler.auth_code is not None
-                or OAuthCallbackHandler.error is not None
-            ):
-                code = OAuthCallbackHandler.auth_code
-                error = OAuthCallbackHandler.error
-
+            if not self._server:
+                return None, "server_stopped", None
+            code = self._server.callback_code    # type: ignore[attr-defined]
+            error = self._server.callback_error  # type: ignore[attr-defined]
+            state = self._server.callback_state  # type: ignore[attr-defined]
+            if code is not None or error is not None:
                 if callback:
                     callback(code, error)
-
-                return code, error
-
+                return code, error, state
             time.sleep(0.1)
 
         # 超时
         if callback:
             callback(None, "timeout")
 
-        return None, "timeout"
+        return None, "timeout", None
 
     def get_callback_url(self) -> str:
         """

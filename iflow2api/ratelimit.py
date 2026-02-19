@@ -1,7 +1,7 @@
 """速率限制模块 - 使用滑动窗口算法实现请求限流"""
 
 import time
-from collections import defaultdict
+from collections import OrderedDict
 from threading import Lock
 from typing import Optional
 
@@ -18,9 +18,13 @@ class RateLimitConfig(BaseModel):
 
 class RateLimiter:
     """速率限制器 - 使用滑动窗口算法
-    
-    支持每分钟、每小时、每天的请求限制
+
+    支持每分钟、每小时、每天的请求限制。
+    使用有序字典实现 LRU 驱逐，防止内存无限增长。
     """
+
+    # 最多跟踪的客户端数量，防止内存耗尽
+    MAX_TRACKED_CLIENTS = 10000
 
     def __init__(
         self,
@@ -29,7 +33,7 @@ class RateLimiter:
         per_day: int = 10000,
     ):
         """初始化速率限制器
-        
+
         Args:
             per_minute: 每分钟最大请求数
             per_hour: 每小时最大请求数
@@ -38,101 +42,113 @@ class RateLimiter:
         self.per_minute = per_minute
         self.per_hour = per_hour
         self.per_day = per_day
-        
-        # 存储每个客户端的请求时间戳
+
+        # 使用 OrderedDict 实现 LRU 驱逐
         # {client_id: [timestamp1, timestamp2, ...]}
-        self._requests: dict[str, list[float]] = defaultdict(list)
+        self._requests: OrderedDict[str, list[float]] = OrderedDict()
         self._lock = Lock()
-    
-    def _clean_old_requests(self, client_id: str, window: float) -> None:
-        """清理过期的请求记录
-        
+
+    def _get_requests(self, client_id: str, now: float) -> list[float]:
+        """获取并清理指定客户端的请求列表（仅清理超过1天的记录）
+
+        统一以最大窗口（1天）做一次清理，避免多次清理导致计数错误。
+
         Args:
             client_id: 客户端标识
-            window: 时间窗口（秒）
-        """
-        cutoff = time.time() - window
-        self._requests[client_id] = [
-            ts for ts in self._requests[client_id] if ts > cutoff
-        ]
-    
-    def _count_requests(self, client_id: str, window: float) -> int:
-        """统计时间窗口内的请求数
-        
-        Args:
-            client_id: 客户端标识
-            window: 时间窗口（秒）
-        
+            now: 当前时间戳
+
         Returns:
-            时间窗口内的请求数
+            清理后的请求时间戳列表
         """
-        self._clean_old_requests(client_id, window)
-        return len(self._requests[client_id])
-    
+        cutoff = now - 86400  # 最大窗口：1天
+        requests = self._requests.get(client_id, [])
+        if requests:
+            cleaned = [t for t in requests if t > cutoff]
+            self._requests[client_id] = cleaned
+            # 移动到末尾（LRU 更新）
+            self._requests.move_to_end(client_id)
+            return cleaned
+        return []
+
+    def _evict_if_needed(self) -> None:
+        """如果超过最大跟踪数量，驱逐最旧的条目"""
+        while len(self._requests) > self.MAX_TRACKED_CLIENTS:
+            self._requests.popitem(last=False)
+
     def is_allowed(self, client_id: str = "default") -> tuple[bool, Optional[str]]:
         """检查请求是否被允许
-        
+
         Args:
             client_id: 客户端标识（如 IP 地址或 API Key）
-        
+
         Returns:
             (是否允许, 错误消息)
         """
         with self._lock:
             now = time.time()
-            
-            # 检查每分钟限制
-            minute_count = self._count_requests(client_id, 60)
+
+            # 一次性清理，获取当天内的所有请求记录
+            requests = self._get_requests(client_id, now)
+
+            # 在内存中按窗口计数（不再重复清理列表）
+            minute_count = sum(1 for t in requests if t > now - 60)
             if minute_count >= self.per_minute:
                 return False, f"Rate limit exceeded: {self.per_minute} requests per minute"
-            
-            # 检查每小时限制
-            hour_count = self._count_requests(client_id, 3600)
+
+            hour_count = sum(1 for t in requests if t > now - 3600)
             if hour_count >= self.per_hour:
                 return False, f"Rate limit exceeded: {self.per_hour} requests per hour"
-            
-            # 检查每天限制
-            day_count = self._count_requests(client_id, 86400)
-            if day_count >= self.per_day:
+
+            # 剩余全部在1天内，直接计总数
+            if len(requests) >= self.per_day:
                 return False, f"Rate limit exceeded: {self.per_day} requests per day"
-            
+
             # 记录请求
-            self._requests[client_id].append(now)
+            requests.append(now)
+            self._requests[client_id] = requests
+            self._evict_if_needed()
             return True, None
-    
+
     def record_request(self, client_id: str = "default") -> None:
-        """记录一次请求
-        
+        """记录一次请求（不做限制检查）
+
         Args:
             client_id: 客户端标识
         """
         with self._lock:
-            self._requests[client_id].append(time.time())
-    
+            now = time.time()
+            requests = self._requests.get(client_id, [])
+            requests.append(now)
+            self._requests[client_id] = requests
+            self._requests.move_to_end(client_id)
+            self._evict_if_needed()
+
     def get_stats(self, client_id: str = "default") -> dict:
         """获取客户端的请求统计
-        
+
         Args:
             client_id: 客户端标识
-        
+
         Returns:
             统计信息字典
         """
         with self._lock:
+            now = time.time()
+            requests = self._get_requests(client_id, now)
             return {
-                "minute": self._count_requests(client_id, 60),
-                "hour": self._count_requests(client_id, 3600),
-                "day": self._count_requests(client_id, 86400),
+                "minute": sum(1 for t in requests if t > now - 60),
+                "hour": sum(1 for t in requests if t > now - 3600),
+                "day": len(requests),
                 "limits": {
                     "per_minute": self.per_minute,
                     "per_hour": self.per_hour,
                     "per_day": self.per_day,
                 },
             }
-    
+
     def reset(self, client_id: Optional[str] = None) -> None:
         """重置请求计数
-        
+
         Args:
             client_id: 客户端标识，如果为 None 则重置所有
         """

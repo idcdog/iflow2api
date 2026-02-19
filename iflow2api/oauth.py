@@ -1,5 +1,7 @@
 """iFlow OAuth 认证实现"""
 
+import base64
+import secrets
 import httpx
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
@@ -50,8 +52,6 @@ class IFlowOAuth:
             httpx.HTTPError: HTTP 请求失败
             ValueError: 响应数据格式错误
         """
-        import base64
-
         client = await self._get_client()
 
         # 使用 Basic Auth
@@ -89,8 +89,6 @@ class IFlowOAuth:
 
     async def refresh_token(self, refresh_token: str) -> Dict[str, Any]:
         """刷新 token"""
-        import base64
-
         client = await self._get_client()
 
         credentials = base64.b64encode(
@@ -144,16 +142,15 @@ class IFlowOAuth:
             httpx.HTTPError: HTTP 请求失败
             ValueError: 响应数据格式错误或 access_token 无效
         """
-        from urllib.parse import quote
-
         client = await self._get_client()
 
-        # 使用查询参数传递 access_token
-        url = f"{self.USER_INFO_URL}?accessToken={quote(access_token)}"
-
+        # 使用 Authorization 请求头传递 token，避免出现在 URL / 日志中（H-01 修复）
         response = await client.get(
-            url,
-            headers={"Accept": "application/json"},
+            self.USER_INFO_URL,
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {access_token}",
+            },
         )
 
         if response.status_code == 401:
@@ -183,8 +180,6 @@ class IFlowOAuth:
         Returns:
             OAuth 授权 URL
         """
-        import secrets
-
         if state is None:
             state = secrets.token_urlsafe(16)
 

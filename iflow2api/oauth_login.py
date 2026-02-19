@@ -1,5 +1,6 @@
 """OAuth 登录功能的独立模块"""
 
+import secrets
 import webbrowser
 import threading
 import asyncio
@@ -53,15 +54,25 @@ class OAuthLoginHandler:
 
                 self.add_log(f"OAuth 回调服务器已启动: {server.get_callback_url()}")
 
-                # 3. 打开浏览器访问 OAuth 授权页面
+                # 3. 生成 CSRF 防护 state 并打开浏览器（C-05 修复）
                 oauth = IFlowOAuth()
-                auth_url = oauth.get_auth_url(redirect_uri=server.get_callback_url())
+                csrf_state = secrets.token_urlsafe(16)
+                auth_url = oauth.get_auth_url(
+                    redirect_uri=server.get_callback_url(),
+                    state=csrf_state,
+                )
                 webbrowser.open(auth_url)
                 self.add_log("已打开浏览器，请完成授权...")
 
-                # 4. 等待回调
-                code, error = server.wait_for_callback(timeout=60)
+                # 4. 等待回调（返回 state 供校验）
+                code, error, returned_state = server.wait_for_callback(timeout=60)
                 server.stop()
+
+                # 校验 state，防止 CSRF（C-05 修复）
+                if returned_state != csrf_state:
+                    self.add_log("OAuth 授权失败: state 校验不通过，可能存在 CSRF 攻击")
+                    self._is_logging_in = False
+                    return
 
                 if error:
                     self.add_log(f"OAuth 授权失败: {error}")

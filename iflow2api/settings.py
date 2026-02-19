@@ -1,66 +1,101 @@
 """应用配置管理 - 使用 ~/.iflow/settings.json 统一管理配置"""
 
 import json
+import logging
 from pathlib import Path
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+logger = logging.getLogger("iflow2api")
 
 from .config import load_iflow_config, save_iflow_config, IFlowConfig
+from .crypto import ConfigEncryption
 from .autostart import set_auto_start as _set_auto_start
 from .autostart import get_auto_start as _get_auto_start
 from .autostart import is_auto_start_supported, get_platform_name
 
 
 class AppSettings(BaseModel):
-    """应用配置修"""
+    """应用配置"""
 
-    # 服务器配置
+    # 服务器配置（M-08: 添加范围校验）
     host: str = "0.0.0.0"
-    port: int = 28000
+    port: int = Field(default=28000, ge=1, le=65535)
 
     # iFlow 配置 (从 ~/.iflow/settings.json 读取)
     api_key: str = ""
     base_url: str = "https://apis.iflow.cn/v1"
 
     # OAuth 配置 (从 ~/.iflow/settings.json 读取)
-    auth_type: str = "api-key"  # 认证类型: oauth-iflow, api-key, openai-compatible
-    oauth_access_token: str = ""  # OAuth 访问令牌
-    oauth_refresh_token: str = ""  # OAuth 刷新令牌
-    oauth_expires_at: Optional[str] = None  # OAuth token 过期时间 (ISO 格式)
+    auth_type: str = "api-key"
+    oauth_access_token: str = ""
+    oauth_refresh_token: str = ""
+    oauth_expires_at: Optional[str] = None
 
-    # 应用设置 (保存到 ~/.iflow2api/config.json)
-    auto_start: bool = False  # 开机自启动
-    start_minimized: bool = False  # 启动时最小化
-    # 关闭按钮行为: "exit"=直接退出, "minimize_to_tray"=最小化到托盘, "minimize_to_taskbar"=最小化到任务栏
+    # 应用设置
+    auto_start: bool = False
+    start_minimized: bool = False
     close_action: str = "minimize_to_tray"
-    auto_run_server: bool = False  # 启动时自动运行服务
+    auto_run_server: bool = False
 
     # 主题设置
-    theme_mode: str = "system"  # 主题模式: light, dark, system
+    theme_mode: str = "system"
 
-    # 速率限制设置
-    rate_limit_enabled: bool = True  # 是否启用速率限制
-    rate_limit_per_minute: int = 60  # 每分钟最大请求数
-    rate_limit_per_hour: int = 1000  # 每小时最大请求数
-    rate_limit_per_day: int = 10000  # 每天最大请求数
+    # 速率限制设置（M-08: 范围校验）
+    rate_limit_enabled: bool = True
+    rate_limit_per_minute: int = Field(default=60, ge=1, le=100000)
+    rate_limit_per_hour: int = Field(default=1000, ge=1, le=1000000)
+    rate_limit_per_day: int = Field(default=10000, ge=1, le=10000000)
 
-    # 思考链（Chain of Thought）设置
-    # 当模型返回 reasoning_content 时：
-    # - False: 将 reasoning_content 合并到 content，确保 OpenAI 兼容客户端正常工作
-    # - True（默认）: 保留 reasoning_content 字段，客户端可分别处理思考过程和最终回答
+    # 思考链设置
     preserve_reasoning_content: bool = True
 
     # 语言设置
-    language: str = "zh"  # 界面语言: zh, en
+    language: str = "zh"
 
     # 更新检查设置
-    check_update_on_startup: bool = True  # 启动时检查更新
-    skip_version: str = ""  # 跳过的版本号
+    check_update_on_startup: bool = True
+    skip_version: str = ""
 
     # 自定义 API 鉴权设置
-    custom_api_key: str = ""  # 自定义 API 密钥，留空则不验证
-    custom_auth_header: str = ""  # 自定义授权标头名称，留空则使用默认的 Authorization
+    custom_api_key: str = ""
+    custom_auth_header: str = ""
+
+
+# lazy singleton for token encryption
+_config_encryption: Optional[ConfigEncryption] = None
+
+
+def _get_encryption() -> ConfigEncryption:
+    """返回全局加密实例（懒初始化）"""
+    global _config_encryption
+    if _config_encryption is None:
+        _config_encryption = ConfigEncryption()
+    return _config_encryption
+
+
+def _encrypt_token(token: str) -> str:
+    """加密 OAuth token；若 cryptography 不可用则原样返回"""
+    if not token:
+        return token
+    if token.startswith("enc:"):
+        return token  # 已加密
+    enc = _get_encryption()
+    if not enc.is_available:
+        return token
+    return f"enc:{enc.encrypt(token)}"
+
+
+def _decrypt_token(value: str) -> str:
+    """解密 OAuth token；若无 enc: 前缀则视为明文直接返回"""
+    if not value or not value.startswith("enc:"):
+        return value
+    try:
+        return _get_encryption().decrypt(value[4:])
+    except Exception:
+        logger.warning("OAuth token 解密失败，将使用原始值")
+        return value
 
 
 def get_config_dir() -> Path:
@@ -126,9 +161,9 @@ def load_settings() -> AppSettings:
                 if "auth_type" in data:
                     settings.auth_type = data["auth_type"]
                 if "oauth_access_token" in data:
-                    settings.oauth_access_token = data["oauth_access_token"]
+                    settings.oauth_access_token = _decrypt_token(data["oauth_access_token"])
                 if "oauth_refresh_token" in data:
-                    settings.oauth_refresh_token = data["oauth_refresh_token"]
+                    settings.oauth_refresh_token = _decrypt_token(data["oauth_refresh_token"])
                 if "oauth_expires_at" in data:
                     settings.oauth_expires_at = data["oauth_expires_at"]
                 # 更新检查设置
@@ -141,8 +176,8 @@ def load_settings() -> AppSettings:
                     settings.custom_api_key = data["custom_api_key"]
                 if "custom_auth_header" in data:
                     settings.custom_auth_header = data["custom_auth_header"]
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.warning("读取应用配置文件失败: %s", _e)
 
     # 如果 api_key 为空，尝试从 ~/.iflow/settings.json 加载
     if not settings.api_key:
@@ -160,8 +195,10 @@ def load_settings() -> AppSettings:
                 settings.oauth_refresh_token = iflow_config.oauth_refresh_token
             if iflow_config.oauth_expires_at:
                 settings.oauth_expires_at = iflow_config.oauth_expires_at.isoformat()
-        except Exception:
-            pass
+        except (FileNotFoundError, ValueError):
+            pass  # 首次运行剪未登录时正常
+        except Exception as _e:
+            logger.warning("从 iFlow 配置加载失败: %s", _e)
 
     return settings
 
@@ -185,8 +222,8 @@ def save_settings(settings: AppSettings) -> None:
         "base_url": settings.base_url,
         # OAuth 配置
         "auth_type": settings.auth_type,
-        "oauth_access_token": settings.oauth_access_token,
-        "oauth_refresh_token": settings.oauth_refresh_token,
+        "oauth_access_token": _encrypt_token(settings.oauth_access_token),
+        "oauth_refresh_token": _encrypt_token(settings.oauth_refresh_token),
         "oauth_expires_at": settings.oauth_expires_at,
         # 应用设置
         "auto_start": settings.auto_start,

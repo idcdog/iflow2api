@@ -3,12 +3,16 @@
 import hmac
 import hashlib
 import json
+import logging
+import re
 import time
 import uuid
 
 import httpx
-from typing import AsyncIterator, Optional
+from typing import AsyncIterator, Literal, Optional, overload
 from .config import IFlowConfig
+
+logger = logging.getLogger("iflow2api")
 
 
 # iFlow CLI 特殊 User-Agent，用于解锁更多模型
@@ -35,7 +39,7 @@ def generate_signature(user_agent: str, session_id: str, timestamp: int, api_key
             hashlib.sha256
         ).hexdigest()
     except Exception as e:
-        print(f"[iflow2api] Failed to generate HMAC signature: {e}")
+        logger.error("Failed to generate HMAC signature: %s", e)
         return None
 
 
@@ -129,23 +133,22 @@ class IFlowProxy:
                 # content 为空但 reasoning_content 有值
                 if preserve_reasoning:
                     # 保留 reasoning_content，同时复制到 content 以确保兼容性
-                    print(f"[iflow2api] 保留思考链: reasoning_content (len={len(reasoning_content)}) → content")
+                    logger.debug("保留思考链: reasoning_content (len=%d) → content", len(reasoning_content))
                     message["content"] = reasoning_content
                 else:
                     # 将 reasoning_content 移动到 content（删除原字段）
-                    print(f"[iflow2api] 合并思考链: reasoning_content → content (len={len(reasoning_content)})")
+                    logger.debug("合并思考链: reasoning_content → content (len=%d)", len(reasoning_content))
                     message["content"] = reasoning_content
                     del message["reasoning_content"]
             elif content and reasoning_content:
                 # 两者都有值
                 if preserve_reasoning:
-                    print(f"[iflow2api] 响应包含 content(len={len(content)}) 和 reasoning_content(len={len(reasoning_content)})")
+                    logger.debug("响应包含 content(len=%d) 和 reasoning_content(len=%d)", len(content), len(reasoning_content))
                 else:
-                    print(f"[iflow2api] 合并思考链: 删除 reasoning_content，保留 content(len={len(content)})")
+                    logger.debug("合并思考链: 删除 reasoning_content，保留 content(len=%d)", len(content))
                     del message["reasoning_content"]
             elif not content and not reasoning_content:
-                print(f"[iflow2api] 警告: message 中 content 和 reasoning_content 均为空")
-                print(f"[iflow2api] message keys: {list(message.keys())}")
+                logger.warning("message 中 content 和 reasoning_content 均为空，keys: %s", list(message.keys()))
         
         return result
 
@@ -224,9 +227,7 @@ class IFlowProxy:
         Returns:
             配置后的请求体（副本）
         """
-        import re
-        
-        # 创建请求体副本，避免修改原始请求
+        # 创建请求体副本
         body = request_body.copy()
         model_lower = model.lower()
         
@@ -237,7 +238,7 @@ class IFlowProxy:
                 body["thinking_mode"] = True
             if "reasoning" not in body:
                 body["reasoning"] = True
-            print(f"[iflow2api] 为模型 {model} 添加思考参数: thinking_mode=True, reasoning=True")
+            logger.debug("为模型 %s 添加思考参数: thinking_mode=True, reasoning=True", model)
         
         # 2. GLM-5 模型 (特殊配置)
         # configureRequest:e=>{e.chat_template_kwargs={enable_thinking:!0},e.enable_thinking=!0,e.thinking={type:"enabled"}}
@@ -248,63 +249,63 @@ class IFlowProxy:
                 body["enable_thinking"] = True
             if "thinking" not in body:
                 body["thinking"] = {"type": "enabled"}
-            print(f"[iflow2api] 为模型 {model} 添加思考参数: chat_template_kwargs, enable_thinking, thinking")
+            logger.debug("为模型 %s 添加思考参数: chat_template_kwargs, enable_thinking, thinking", model)
         
         # 3. GLM-4.7 模型
         # configureRequest:e=>{e.chat_template_kwargs={enable_thinking:!0}}
         elif model == "glm-4.7":
             if "chat_template_kwargs" not in body:
                 body["chat_template_kwargs"] = {"enable_thinking": True}
-            print(f"[iflow2api] 为模型 {model} 添加思考参数: chat_template_kwargs")
+            logger.debug("为模型 %s 添加思考参数: chat_template_kwargs", model)
         
         # 4. 其他 GLM 模型
         # configureRequest:e=>{e.chat_template_kwargs={enable_thinking:!0}}
         elif model_lower.startswith("glm-"):
             if "chat_template_kwargs" not in body:
                 body["chat_template_kwargs"] = {"enable_thinking": True}
-            print(f"[iflow2api] 为模型 {model} 添加思考参数: chat_template_kwargs")
+            logger.debug("为模型 %s 添加思考参数: chat_template_kwargs", model)
         
         # 5. Kimi-K2.5 模型
         # configureRequest:(e,r)=>{e.thinking={type:"enabled"}}
         elif model_lower.startswith("kimi-k2.5"):
             if "thinking" not in body:
                 body["thinking"] = {"type": "enabled"}
-            print(f"[iflow2api] 为模型 {model} 添加思考参数: thinking")
+            logger.debug("为模型 %s 添加思考参数: thinking", model)
         
         # 6. 包含 "thinking" 的模型 (如 kimi-k2-thinking, gemini-2.0-flash-thinking)
         # configureRequest:e=>{e.thinking_mode=!0}
         elif "thinking" in model_lower:
             if "thinking_mode" not in body:
                 body["thinking_mode"] = True
-            print(f"[iflow2api] 为模型 {model} 添加思考参数: thinking_mode")
+            logger.debug("为模型 %s 添加思考参数: thinking_mode", model)
         
         # 7. mimo- 模型
         # configureRequest:e=>{e.thinking={type:"enabled"}}
         elif model_lower.startswith("mimo-"):
             if "thinking" not in body:
                 body["thinking"] = {"type": "enabled"}
-            print(f"[iflow2api] 为模型 {model} 添加思考参数: thinking")
+            logger.debug("为模型 %s 添加思考参数: thinking", model)
         
         # 8. Claude 模型
         # configureRequest:e=>{e.chat_template_kwargs={enable_thinking:!0}}
         elif "claude" in model_lower:
             if "chat_template_kwargs" not in body:
                 body["chat_template_kwargs"] = {"enable_thinking": True}
-            print(f"[iflow2api] 为模型 {model} 添加思考参数: chat_template_kwargs")
+            logger.debug("为模型 %s 添加思考参数: chat_template_kwargs", model)
         
         # 9. sonnet- 模型
         # configureRequest:e=>{e.chat_template_kwargs={enable_thinking:!0}}
         elif "sonnet-" in model_lower:
             if "chat_template_kwargs" not in body:
                 body["chat_template_kwargs"] = {"enable_thinking": True}
-            print(f"[iflow2api] 为模型 {model} 添加思考参数: chat_template_kwargs")
+            logger.debug("为模型 %s 添加思考参数: chat_template_kwargs", model)
         
         # 10. 包含 "reasoning" 的模型
         # configureRequest:e=>{e.reasoning=!0}
         elif "reasoning" in model_lower:
             if "reasoning" not in body:
                 body["reasoning"] = True
-            print(f"[iflow2api] 为模型 {model} 添加思考参数: reasoning")
+            logger.debug("为模型 %s 添加思考参数: reasoning", model)
         
         # 11. Qwen 4B 模型 (不支持思考，需要删除相关参数)
         # configureRequest:e=>{delete e.thinking_mode,delete e.reasoning,delete e.chat_template_kwargs}
@@ -312,7 +313,7 @@ class IFlowProxy:
             for key in ["thinking_mode", "reasoning", "chat_template_kwargs"]:
                 if key in body:
                     del body[key]
-            print(f"[iflow2api] 为模型 {model} 移除思考参数 (不支持)")
+            logger.debug("为模型 %s 移除思考参数 (不支持)", model)
         
         return body
 
@@ -406,11 +407,25 @@ class IFlowProxy:
             ],
         }
 
+    @overload
+    async def chat_completions(
+        self,
+        request_body: dict,
+        stream: Literal[True],
+    ) -> AsyncIterator[bytes]: ...
+
+    @overload
+    async def chat_completions(
+        self,
+        request_body: dict,
+        stream: Literal[False] = ...,
+    ) -> dict: ...
+
     async def chat_completions(
         self,
         request_body: dict,
         stream: bool = False,
-    ) -> dict | AsyncIterator[bytes]:
+    ) -> "dict | AsyncIterator[bytes]":
         """
         调用 chat completions API
 
@@ -444,9 +459,12 @@ class IFlowProxy:
                 headers = self._get_headers(stream=True)
                 
                 # 调试：打印请求详情
-                print(f"[iflow2api] 流式请求 URL: {self.base_url}/chat/completions")
-                print(f"[iflow2api] 流式请求头: {json.dumps({k: v for k, v in headers.items() if k != 'Authorization'}, ensure_ascii=False)}")
-                print(f"[iflow2api] 流式请求体: model={request_body.get('model')}, messages={len(request_body.get('messages', []))}, tools={len(request_body.get('tools', [])) if 'tools' in request_body else 0}")
+                logger.debug("流式请求 URL: %s/chat/completions", self.base_url)
+                logger.debug("流式请求头: %s", json.dumps({k: v for k, v in headers.items() if k != 'Authorization'}, ensure_ascii=False))
+                logger.debug("流式请求体: model=%s, messages=%d, tools=%d",
+                             request_body.get('model'),
+                             len(request_body.get('messages', [])),
+                             len(request_body.get('tools', [])) if 'tools' in request_body else 0)
                 
                 try:
                     async with client.stream(
@@ -461,14 +479,14 @@ class IFlowProxy:
                         
                         # 记录上游响应信息以便调试
                         content_type = response.headers.get("content-type", "unknown")
-                        print(f"[iflow2api] 上游响应: status={response.status_code}, content-type={content_type}")
+                        logger.debug("上游响应: status=%d, content-type=%s", response.status_code, content_type)
                         
                         # 如果上游没有返回 SSE 流（可能是 JSON 错误），读取并处理
                         if "text/event-stream" not in content_type and "application/octet-stream" not in content_type:
                             # 上游返回了非流式响应（可能是错误）
                             raw_body = await response.aread()
                             body_str = raw_body.decode("utf-8", errors="replace")
-                            print(f"[iflow2api] 上游非流式响应体: {body_str[:500]}")
+                            logger.debug("上游非流式响应体: %s", body_str[:500])
                             try:
                                 error_data = json.loads(body_str)
                                 error_msg = error_data.get("msg") or error_data.get("error", {}).get("message") or body_str[:200]
@@ -535,13 +553,13 @@ class IFlowProxy:
                                 yield (line_str + "\n").encode("utf-8")
                                 
                 except Exception as e:
-                    print(f"[iflow2api] 流式请求错误: {e}")
+                    logger.error("流式请求错误: %s", e)
                     raise
                 finally:
                     if chunk_count == 0:
-                        print(f"[iflow2api] 警告: 上游流式响应为空 (0 chunks)")
+                        logger.warning("上游流式响应为空 (0 chunks)")
                     else:
-                        print(f"[iflow2api] 流式完成: 共 {chunk_count} chunks")
+                        logger.debug("流式完成: 共 %d chunks", chunk_count)
             
             return stream_generator()
         else:
@@ -605,14 +623,18 @@ class IFlowProxy:
                         async for chunk in response.aiter_bytes():
                             yield chunk
                 except Exception as e:
-                    print(f"[iflow2api] proxy_request 流式错误: {e}")
+                    logger.error("proxy_request 流式错误: %s", e)
                     raise
             return stream_gen()
 
         if method.upper() == "GET":
             response = await client.get(url, headers=self._get_headers())
-        elif method.upper() == "POST":
-            response = await client.post(url, headers=self._get_headers(), json=body)
+        elif method.upper() in ("POST", "PUT", "PATCH"):
+            response = await client.request(
+                method.upper(), url, headers=self._get_headers(), json=body
+            )
+        elif method.upper() == "DELETE":
+            response = await client.delete(url, headers=self._get_headers())
         else:
             raise ValueError(f"不支持的 HTTP 方法: {method}")
 

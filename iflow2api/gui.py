@@ -1,6 +1,7 @@
 """Flet GUI 应用"""
 
 import flet as ft
+import logging
 from datetime import datetime
 from typing import Optional
 import threading
@@ -27,6 +28,8 @@ from .updater import (
     GITHUB_RELEASES_URL,
 )
 
+logger = logging.getLogger("iflow2api")
+
 
 class IFlow2ApiApp:
     """iflow2api GUI 应用"""
@@ -34,7 +37,7 @@ class IFlow2ApiApp:
     def __init__(self, page: ft.Page):
         self.page = page
         self.settings = load_settings()
-        print(f"[DEBUG] 初始化应用, close_action={self.settings.close_action}")
+        logger.debug("初始化应用, close_action=%s", self.settings.close_action)
 
         # 设置语言
         set_language(self.settings.language)
@@ -93,7 +96,7 @@ class IFlow2ApiApp:
         # 始终拦截窗口关闭事件，在事件处理程序中根据 close_action 决定行为
         # 这确保了关闭按钮不会直接退出应用
         self.page.window.prevent_close = True
-        print(f"[DEBUG] prevent_close 已设置为 True (close_action={self.settings.close_action})")
+        logger.debug("prevent_close 已设置为 True (close_action=%s)", self.settings.close_action)
 
         # 窗口关闭事件
         self.page.window.on_event = self._on_window_event
@@ -117,29 +120,29 @@ class IFlow2ApiApp:
         if e.type == ft.WindowEventType.CLOSE:
             close_action = self.settings.close_action
             is_macos = sys.platform == "darwin"
-            print(f"[DEBUG] 窗口关闭事件, close_action={close_action}, platform={sys.platform}")
+            logger.debug("窗口关闭事件, close_action=%s, platform=%s", close_action, sys.platform)
             
             if close_action == "minimize_to_tray":
                 if is_tray_available() and not is_macos:
                     # Windows/Linux: 最小化到系统托盘 - 隐藏窗口
-                    print(f"[DEBUG] 最小化到系统托盘 (visible=False)")
+                    logger.debug("最小化到系统托盘 (visible=False)")
                     self.page.window.visible = False
                     self.page.update()
                 else:
                     # macOS 或 托盘不可用: 回退到最小化到任务栏/Dock
                     # macOS 上 pystray 需要主线程运行，与 Flet 冲突，因此无法显示托盘图标
                     # 为防止窗口丢失，强制使用最小化
-                    print(f"[DEBUG] {'macOS' if is_macos else '托盘不可用'}，回退到最小化到任务栏/Dock")
+                    logger.debug("%s，回退到最小化到任务栏/Dock", 'macOS' if is_macos else '托盘不可用')
                     self.page.window.minimized = True
                     self.page.update()
             elif close_action == "minimize_to_taskbar":
                 # 最小化到任务栏
-                print(f"[DEBUG] 最小化到任务栏")
+                logger.debug("最小化到任务栏")
                 self.page.window.minimized = True
                 self.page.update()
             else:
                 # 直接退出
-                print(f"[DEBUG] 直接退出")
+                logger.debug("直接退出")
                 self._quit_app()
 
     def _setup_tray(self):

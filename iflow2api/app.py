@@ -2,6 +2,7 @@
 
 import sys
 import json
+import logging
 import uuid
 import asyncio
 import time
@@ -12,12 +13,15 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+
+logger = logging.getLogger("iflow2api")
 
 from .config import load_iflow_config, check_iflow_login, IFlowConfig, save_iflow_config
 from .proxy import IFlowProxy
 from .token_refresher import OAuthTokenRefresher
-from .ratelimit import RateLimitConfig, init_limiter, create_rate_limit_middleware, get_rate_limiter
+from .ratelimit import RateLimitConfig, init_limiter, create_rate_limit_middleware, get_rate_limiter as _ratelimit_get_rate_limiter
+from .ratelimit import RateLimiter
 from .vision import (
     is_vision_model,
     supports_vision,
@@ -61,8 +65,8 @@ def openai_to_anthropic_response(openai_response: dict, model: str) -> dict:
     finish_reason = "end_turn"
 
     if not choices:
-        print(f"[iflow2api] 警告: OpenAI 响应中 choices 数组为空")
-        print(f"[iflow2api] 完整响应: {json.dumps(openai_response, ensure_ascii=False)[:500]}")
+        logger.warning("OpenAI 响应中 choices 数组为空")
+        logger.debug("完整响应: %s", json.dumps(openai_response, ensure_ascii=False)[:500])
         content_blocks = [{"type": "text", "text": "[错误: API 未返回有效内容]"}]
     else:
         choice = choices[0]
@@ -89,8 +93,7 @@ def openai_to_anthropic_response(openai_response: dict, model: str) -> dict:
             })
 
         if not content_blocks:
-            print(f"[iflow2api] 警告: message.content 和 tool_calls 均为空")
-            print(f"[iflow2api] message 内容: {json.dumps(message, ensure_ascii=False)}")
+            logger.warning("message.content 和 tool_calls 均为空: %s", json.dumps(message, ensure_ascii=False))
             content_blocks = [{"type": "text", "text": "[错误: API 返回空内容]"}]
 
         # 转换 finish_reason
@@ -300,12 +303,13 @@ def get_mapped_model(anthropic_model: str, has_images: bool = False) -> str:
     Returns:
         映射后的模型名
     """
-    # iFlow 已知模型 ID（包括文本模型和视觉模型）
+    # iFlow 已知模型 ID（与 proxy.py get_models() 保持一致）
     known_iflow_models = {
         # 文本模型
         "glm-4.6", "glm-4.7", "glm-5",
         "iFlow-ROME-30BA3B", "deepseek-v3.2-chat",
         "qwen3-coder-plus", "kimi-k2", "kimi-k2-thinking", "kimi-k2.5",
+        "kimi-k2-0905",  # L-02 修复：补充缺失模型
         "minimax-m2.5",
         # 视觉模型
         "glm-4v", "glm-4v-plus", "glm-4v-flash", "glm-4.5v", "glm-4.6v",
@@ -317,7 +321,7 @@ def get_mapped_model(anthropic_model: str, has_images: bool = False) -> str:
         return anthropic_model
     
     # Claude 系列模型名回退到默认模型
-    print(f"[iflow2api] 模型映射: {anthropic_model} → {DEFAULT_IFLOW_MODEL}")
+    logger.info("模型映射: %s → %s", anthropic_model, DEFAULT_IFLOW_MODEL)
     return DEFAULT_IFLOW_MODEL
 
 
@@ -513,10 +517,10 @@ def anthropic_to_openai_request(body: dict) -> dict:
 _proxy: Optional[IFlowProxy] = None
 _config: Optional[IFlowConfig] = None
 _refresher: Optional[OAuthTokenRefresher] = None
-_rate_limiter = None
+_rate_limiter: Optional[RateLimiter] = None
 
-# 请求队列锁 - 确保同一时间只处理一个上游 API 请求
-_api_request_lock = asyncio.Lock()
+# 上游 API 并发信号量 - 最多同时 10 个上游请求（M-02 修复：从全局串行锁升级为并发信号量）
+_api_request_lock = asyncio.Semaphore(10)
 
 
 def get_proxy() -> IFlowProxy:
@@ -528,7 +532,7 @@ def get_proxy() -> IFlowProxy:
     return _proxy
 
 
-def get_rate_limiter():
+def get_rate_limiter() -> Optional[RateLimiter]:
     """获取速率限制器实例"""
     global _rate_limiter
     return _rate_limiter
@@ -538,7 +542,7 @@ def update_proxy_token(token_data: dict):
     """Token 刷新回调，同步更新内存中的代理配置并保存"""
     global _proxy, _config
     if _proxy and _config:
-        print(f"[iflow2api] 检测到 Token 刷新，更新代理配置")
+        logger.info("检测到 Token 刷新，更新代理配置")
         _config.api_key = token_data["access_token"]
         _config.oauth_access_token = token_data["access_token"]
         
@@ -550,7 +554,7 @@ def update_proxy_token(token_data: dict):
         
         # 保存到配置文件
         save_iflow_config(_config)
-        print(f"[iflow2api] Token 已保存到配置文件")
+        logger.info("Token 已保存到配置文件")
 
 
 @asynccontextmanager
@@ -558,22 +562,22 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     global _refresher, _proxy, _rate_limiter
     # 启动时打印版本和系统信息
-    print(get_startup_info())
+    logger.info("%s", get_startup_info())
     
     # 启动时检查配置
     try:
         config = load_iflow_config()
-        print(f"[iflow2api] 已加载 iFlow 配置")
-        print(f"[iflow2api] API Base URL: {config.base_url}")
-        print(f"[iflow2api] API Key: {config.api_key[:10]}...")
+        logger.info("已加载 iFlow 配置")
+        logger.info("API Base URL: %s", config.base_url)
+        logger.info("API Key: ****%s (masked)", config.api_key[-4:])
         if config.model_name:
-            print(f"[iflow2api] 默认模型: {config.model_name}")
+            logger.info("默认模型: %s", config.model_name)
             
         # 启动 Token 刷新任务
         _refresher = OAuthTokenRefresher()
         _refresher.set_refresh_callback(update_proxy_token)
         _refresher.start()
-        print(f"[iflow2api] 已启动 Token 自动刷新任务")
+        logger.info("已启动 Token 自动刷新任务")
         
         # 初始化速率限制器
         from .settings import load_settings
@@ -585,17 +589,18 @@ async def lifespan(app: FastAPI):
             requests_per_day=settings.rate_limit_per_day,
         )
         init_limiter(rate_limit_config)
-        _rate_limiter = get_rate_limiter()
-        print(f"[iflow2api] 速率限制: {'已启用' if settings.rate_limit_enabled else '已禁用'}")
+        _rate_limiter = _ratelimit_get_rate_limiter()
+        logger.info("速率限制: %s", '已启用' if settings.rate_limit_enabled else '已禁用')
         if settings.rate_limit_enabled:
-            print(f"[iflow2api] 限流规则: {settings.rate_limit_per_minute}/分钟, {settings.rate_limit_per_hour}/小时, {settings.rate_limit_per_day}/天")
+            logger.info("限流规则: %d/分钟, %d/小时, %d/天",
+                        settings.rate_limit_per_minute, settings.rate_limit_per_hour, settings.rate_limit_per_day)
         
     except FileNotFoundError as e:
-        print(f"[错误] {e}", file=sys.stderr)
-        print("[提示] 请先运行 'iflow' 命令并完成登录", file=sys.stderr)
+        logger.error("%s", e)
+        logger.error("请先运行 'iflow' 命令并完成登录")
         sys.exit(1)
     except ValueError as e:
-        print(f"[错误] {e}", file=sys.stderr)
+        logger.error("%s", e)
         sys.exit(1)
 
     yield
@@ -653,11 +658,12 @@ lifespan=lifespan,
     openapi_url="/openapi.json",  # OpenAPI schema
 )
 
-# 添加 CORS 中间件
+# 添加 CORS 中间件（H-05 修复：不再同时使用通配符 origin + credentials）
+# 默认允许所有来源但不携带凭据；如需限制来源请在此列举
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,  # RFC 禁止 allow_origins=["*"] + allow_credentials=True
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -666,12 +672,44 @@ app.add_middleware(
 app.middleware("http")(create_rate_limit_middleware())
 
 
+# ============ 请求体大小限制中间件 ============
+
+_MAX_REQUEST_BODY_SIZE = 10 * 1024 * 1024  # 10 MB（H-07 修复）
+
+@app.middleware("http")
+async def limit_request_body(request: Request, call_next):
+    """拒绝超大请求体，防止内存耗尽 DoS（H-07 修复）"""
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > _MAX_REQUEST_BODY_SIZE:
+        return JSONResponse(
+            status_code=413,
+            content={"error": {"message": "Request body too large", "type": "invalid_request_error"}},
+        )
+    return await call_next(request)
+
+
 # ============ 自定义 API 鉴权中间件 ============
+
+# 简单内存缓存，减少每次请求读磁盘（H-08 修复）
+_settings_cache: dict = {"data": None, "ts": 0.0}
+_SETTINGS_CACHE_TTL = 5.0  # 5 秒内复用缓存
+
+
+def _get_cached_settings():
+    """获取缓存的设置，超过 TTL 才重新读盘"""
+    import time as _time
+    from .settings import load_settings
+    now = _time.monotonic()
+    if _settings_cache["data"] is None or now - _settings_cache["ts"] > _SETTINGS_CACHE_TTL:
+        _settings_cache["data"] = load_settings()
+        _settings_cache["ts"] = now
+    return _settings_cache["data"]
+
 
 @app.middleware("http")
 async def custom_auth_middleware(request: Request, call_next):
     """自定义 API 鉴权中间件
-    
+
     如果配置了 custom_api_key，则验证请求头中的授权信息
     支持 "Bearer {key}" 和 "{key}" 两种格式
     """
@@ -679,10 +717,9 @@ async def custom_auth_middleware(request: Request, call_next):
     skip_paths = ["/health", "/docs", "/redoc", "/openapi.json", "/admin"]
     if any(request.url.path.startswith(path) for path in skip_paths):
         return await call_next(request)
-    
-    # 加载设置
-    from .settings import load_settings
-    settings = load_settings()
+
+    # 使用缓存的设置，避免每次请求读磁盘（H-08 修复）
+    settings = _get_cached_settings()
     
     # 如果未设置 custom_api_key，则跳过验证
     if not settings.custom_api_key:
@@ -710,8 +747,9 @@ async def custom_auth_middleware(request: Request, call_next):
     if auth_value.startswith("Bearer "):
         actual_key = auth_value[7:]  # 移除 "Bearer " 前缀
     
-    # 验证 key
-    if actual_key != settings.custom_api_key:
+    # 验证 key（使用常数时间比较防止时序攻击）
+    import hmac as _hmac
+    if not _hmac.compare_digest(actual_key, settings.custom_api_key):
         return JSONResponse(
             status_code=401,
             content={
@@ -752,7 +790,7 @@ try:
     from .admin.routes import admin_router, set_server_manager
     app.include_router(admin_router)
 except ImportError as e:
-    print(f"[iflow2api] 警告: 无法加载管理界面路由: {e}")
+    logger.warning("无法加载管理界面路由: %s", e)
 
 
 @app.middleware("http")
@@ -776,8 +814,8 @@ async def log_requests(request: Request, call_next):
         else:
             return f"{size/1024/1024:.1f}MB"
     
-    print(f"[iflow2api] Request: {request.method} {request.url.path}" +
-          (f" ({format_size(body_size)})" if body_size > 0 else ""))
+    logger.info("Request: %s %s%s", request.method, request.url.path,
+                 f" ({format_size(body_size)})" if body_size > 0 else "")
     
     if request.method == "OPTIONS":
         # 显式处理 OPTIONS 请求以确保 CORS 正常
@@ -788,12 +826,12 @@ async def log_requests(request: Request, call_next):
     
     # 计算响应时间
     elapsed_ms = (time.time() - start_time) * 1000
-    print(f"[iflow2api] Response: {response.status_code} ({elapsed_ms:.0f}ms)")
+    logger.info("Response: %d (%.0fms)", response.status_code, elapsed_ms)
     
     # 如果返回 405，打印更多调试信息
     if response.status_code == 405:
-        print(f"[调试] 路径 {request.url.path} 不支持 {request.method} 方法")
-        print(f"[调试] 当前已注册的 POST 路由包括: /v1/chat/completions, /v1/messages, / 等")
+        logger.debug("路径 %s 不支持 %s 方法", request.url.path, request.method)
+        logger.debug("当前已注册的 POST 路由包括: /v1/chat/completions, /v1/messages, / 等")
         
     return response
 
@@ -819,8 +857,7 @@ class ChatCompletionRequest(BaseModel):
     frequency_penalty: Optional[float] = None
     user: Optional[str] = None
 
-    class Config:
-        extra = "allow"  # 允许额外字段
+    model_config = ConfigDict(extra="allow")
 
 
 # ============ 示例请求 ============
@@ -1064,11 +1101,14 @@ async def chat_completions_openai(request: Request):
     try:
         body_bytes = await request.body()
         body = json.loads(body_bytes.decode("utf-8"))
+        if "messages" not in body:
+            return create_error_response(422, "Field 'messages' is required", "invalid_request_error")
         stream = body.get("stream", False)
         model = body.get("model", "unknown")
         msg_count = len(body.get("messages", []))
         has_tools = "tools" in body
-        print(f"[iflow2api] Chat请求: model={model}, stream={stream}, messages={msg_count}, has_tools={has_tools}")
+        logger.info("Chat请求: model=%s, stream=%s, messages=%d, has_tools=%s",
+                     model, stream, msg_count, has_tools)
 
         if stream:
             # 流式响应 - 整个流式传输过程都在锁内进行
@@ -1076,23 +1116,27 @@ async def chat_completions_openai(request: Request):
                 async def generate_with_lock():
                     """在锁内完成整个流式传输"""
                     async with _api_request_lock:
-                        print(f"[iflow2api] 获取上游流式响应...")
+                        logger.debug("获取上游流式响应...")
                         stream_gen = await proxy.chat_completions(body, stream=True)
                         chunk_count = 0
                         try:
                             async for chunk in stream_gen:
                                 chunk_count += 1
                                 if chunk_count <= 3:
-                                    print(f"[iflow2api] 流式chunk[{chunk_count}]: {chunk[:200]}")
+                                    logger.debug("流式chunk[%d]: %s", chunk_count, chunk[:200])
                                 yield chunk
                         except Exception as e:
                             # 传输过程中的错误
-                            print(f"[iflow2api] Streaming error after {chunk_count} chunks: {e}")
+                            logger.error("Streaming error after %d chunks: %s", chunk_count, e)
+                        else:
+                            # 正常结束：确保发送 [DONE] 标记（上游不一定发送）
+                            if chunk_count > 0:
+                                yield b"data: [DONE]\n\n"
                         finally:
-                            print(f"[iflow2api] 流式完成: 共 {chunk_count} chunks")
+                            logger.debug("流式完成: 共 %d chunks", chunk_count)
                             if chunk_count == 0:
                                 # 上游返回了空的流式响应，生成一个错误回退
-                                print(f"[iflow2api] 生成错误回退响应 (0 chunks from upstream)")
+                                logger.warning("生成错误回退响应 (0 chunks from upstream)")
                                 import time as _time
                                 fallback = {
                                     "id": f"fallback-{int(_time.time())}",
@@ -1119,9 +1163,10 @@ async def chat_completions_openai(request: Request):
                 )
             except Exception as e:
                 error_msg = str(e)
-                if hasattr(e, "response"):
+                resp = getattr(e, "response", None)
+                if resp is not None:
                     try:
-                        error_data = e.response.json()
+                        error_data = resp.json()
                         error_msg = error_data.get("msg", error_msg)
                     except Exception:
                         pass
@@ -1129,12 +1174,11 @@ async def chat_completions_openai(request: Request):
         else:
             # 使用锁确保同一时间只有一个上游请求
             async with _api_request_lock:
-                print(f"[iflow2api] 获取上游非流式响应...")
+                logger.debug("获取上游非流式响应...")
                 result = await proxy.chat_completions(body, stream=False)
             # 验证响应包含有效的 choices
             if not result.get("choices"):
-                print(f"[iflow2api] 错误: API 响应缺少 choices 数组")
-                print(f"[iflow2api] 完整响应: {json.dumps(result, ensure_ascii=False)[:500]}")
+                logger.error("API 响应缺少 choices 数组: %s", json.dumps(result, ensure_ascii=False)[:500])
                 return create_error_response(500, "API 响应格式错误: 缺少 choices 数组")
             
             # 日志输出关键信息
@@ -1142,8 +1186,10 @@ async def chat_completions_openai(request: Request):
             content = msg.get("content")
             reasoning = msg.get("reasoning_content")
             tool_calls = msg.get("tool_calls")
-            print(f"[iflow2api] 非流式响应: content={repr(content[:80]) if content else None}, "
-                  f"reasoning={'有' if reasoning else '无'}, tool_calls={'有' if tool_calls else '无'}")
+            logger.debug("非流式响应: content=%r, reasoning=%s, tool_calls=%s",
+                         content[:80] if content else None,
+                         '有' if reasoning else '无',
+                         '有' if tool_calls else '无')
             
             return JSONResponse(content=result)
 
@@ -1152,10 +1198,11 @@ async def chat_completions_openai(request: Request):
     except Exception as e:
         error_msg = str(e)
         status_code = 500
-        if hasattr(e, "response"):
+        resp = getattr(e, "response", None)
+        if resp is not None:
             try:
-                status_code = e.response.status_code
-                error_data = e.response.json()
+                status_code = resp.status_code
+                error_data = resp.json()
                 error_msg = error_data.get("msg", error_msg)
             except Exception:
                 pass
@@ -1288,6 +1335,11 @@ async def messages_anthropic(request: Request):
     try:
         body_bytes = await request.body()
         body = json.loads(body_bytes.decode("utf-8"))
+        if "messages" not in body:
+            return JSONResponse(
+                status_code=422,
+                content={"type": "error", "error": {"type": "invalid_request_error", "message": "Field 'messages' is required"}}
+            )
         stream = body.get("stream", False)
         original_model = body.get("model", "unknown")
         
@@ -1295,7 +1347,8 @@ async def messages_anthropic(request: Request):
         openai_body = anthropic_to_openai_request(body)
         mapped_model = openai_body["model"]
         
-        print(f"[iflow2api] Anthropic 格式请求: model={original_model} → {mapped_model}, stream={stream}")
+        logger.info("Anthropic 格式请求: model=%s → %s, stream=%s",
+                     original_model, mapped_model, stream)
 
         proxy = get_proxy()
 
@@ -1310,7 +1363,7 @@ async def messages_anthropic(request: Request):
             async def generate_anthropic_stream_with_lock():
                 """在锁内完成整个流式传输（含 tool_use 支持）"""
                 async with _api_request_lock:
-                    print(f"[iflow2api] 获取上游流式响应 (Anthropic)...")
+                    logger.debug("获取上游流式响应 (Anthropic)...")
                     stream_gen = await proxy.chat_completions(openai_body, stream=True)
 
                     # 发送 message_start
@@ -1405,7 +1458,10 @@ async def messages_anthropic(request: Request):
                             stop_reason = "max_tokens"
 
                     async for chunk in stream_gen:
-                        chunk_str = chunk.decode('utf-8') if isinstance(chunk, bytes) else chunk
+                        if isinstance(chunk, str):
+                            chunk_str = chunk
+                        else:
+                            chunk_str = bytes(chunk).decode('utf-8')
                         buffer += chunk_str
 
                         while "\n" in buffer:
@@ -1450,22 +1506,24 @@ async def messages_anthropic(request: Request):
             # 非流式响应 - 转换为 Anthropic 格式
             # 使用锁确保同一时间只有一个上游请求
             async with _api_request_lock:
-                print(f"[iflow2api] 获取上游非流式响应 (Anthropic)...")
+                logger.debug("获取上游非流式响应 (Anthropic)...")
                 openai_result = await proxy.chat_completions(openai_body, stream=False)
-            print(f"[iflow2api] 收到 OpenAI 格式响应: {json.dumps(openai_result, ensure_ascii=False)[:300]}")
+            logger.debug("收到 OpenAI 格式响应: %s", json.dumps(openai_result, ensure_ascii=False)[:300])
             anthropic_result = openai_to_anthropic_response(openai_result, mapped_model)
             first_block = anthropic_result['content'][0] if anthropic_result['content'] else {}
             first_preview = first_block.get('text') or first_block.get('name') or ''
-            print(f"[iflow2api] Anthropic 格式响应: id={anthropic_result['id']}, stop_reason={anthropic_result['stop_reason']}, first_block_preview={first_preview[:80]}")
+            logger.debug("Anthropic 格式响应: id=%s, stop_reason=%s, preview=%s",
+                         anthropic_result['id'], anthropic_result['stop_reason'], first_preview[:80])
             return JSONResponse(content=anthropic_result)
 
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
     except Exception as e:
         error_msg = str(e)
-        if hasattr(e, "response"):
+        resp = getattr(e, "response", None)
+        if resp is not None:
             try:
-                error_data = e.response.json()
+                error_data = resp.json()
                 error_msg = error_data.get("msg", error_msg)
             except Exception:
                 pass
@@ -1501,7 +1559,7 @@ async def root_post(request: Request):
             async def generate_with_lock():
                 """在锁内完成整个流式传输"""
                 async with _api_request_lock:
-                    print(f"[iflow2api] 获取上游流式响应 (root_post)...")
+                    logger.debug("获取上游流式响应 (root_post)...")
                     stream_gen = await proxy.chat_completions(body, stream=True)
                     chunk_count = 0
                     try:
@@ -1509,7 +1567,7 @@ async def root_post(request: Request):
                             chunk_count += 1
                             yield chunk
                     finally:
-                        print(f"[iflow2api] 流式完成 (root_post): 共 {chunk_count} chunks")
+                        logger.debug("流式完成 (root_post): 共 %d chunks", chunk_count)
             
             return StreamingResponse(
                 generate_with_lock(),
@@ -1519,12 +1577,11 @@ async def root_post(request: Request):
         else:
             # 使用锁确保同一时间只有一个上游请求
             async with _api_request_lock:
-                print(f"[iflow2api] 获取上游非流式响应 (root_post)...")
+                logger.debug("获取上游非流式响应 (root_post)...")
                 result = await proxy.chat_completions(body, stream=False)
             # 验证响应包含有效的 choices
             if not result.get("choices"):
-                print(f"[iflow2api] 错误: API 响应缺少 choices 数组 (root_post)")
-                print(f"[iflow2api] 完整响应: {json.dumps(result, ensure_ascii=False)[:500]}")
+                logger.error("API 响应缺少 choices 数组 (root_post): %s", json.dumps(result, ensure_ascii=False)[:500])
                 raise HTTPException(status_code=500, detail="API 响应格式错误: 缺少 choices 数组")
             return JSONResponse(content=result)
     except Exception as e:
@@ -1588,16 +1645,21 @@ async def count_tokens(request: Request):
             else:
                 total_chars += len(str(content))
         
-        # 粗略估算：中文约 1.5 字符/token，英文约 4 字符/token
-        # 取中间值 2.5
-        estimated_tokens = max(1, int(total_chars / 2.5))
+        # L-06: 语言感知 token 估算：中文约 1.5 字/token，英文约 4 字/token
+        cjk_chars = sum(1 for c in str(system) + "".join(
+            (block.get("text", "") if isinstance(block, dict) and block.get("type") == "text" else str(msg.get("content", "")) if not isinstance(msg.get("content"), list) else "")
+            for msg in messages
+            for block in (msg.get("content") if isinstance(msg.get("content"), list) else [msg])
+        ) if '\u4e00' <= c <= '\u9fff')
+        ascii_chars = total_chars - cjk_chars
+        estimated_tokens = max(1, int(cjk_chars / 1.5 + ascii_chars / 4.0))
         
         return {
             "input_tokens": estimated_tokens
         }
     except Exception as e:
         # 出错时返回一个默认值
-        print(f"[iflow2api] count_tokens 错误: {e}")
+        logger.warning("count_tokens 错误: %s", e)
         return {"input_tokens": 100}
 
 
@@ -1608,17 +1670,15 @@ def main():
 
     # 检查是否已登录
     if not check_iflow_login():
-        print("[错误] iFlow 未登录", file=sys.stderr)
-        print("[提示] 请先运行 'iflow' 命令并完成登录", file=sys.stderr)
+        logger.error("iFlow 未登录，请先运行 'iflow' 命令并完成登录")
         sys.exit(1)
 
     # 加载配置
     settings = load_settings()
 
     # 打印启动信息
-    print(get_startup_info())
-    print(f"  监听地址: {settings.host}:{settings.port}")
-    print()
+    logger.info("%s", get_startup_info())
+    logger.info("  监听地址: %s:%d", settings.host, settings.port)
 
     # 启动服务 - 直接传入 app 对象而非字符串，避免打包后导入失败
     uvicorn.run(

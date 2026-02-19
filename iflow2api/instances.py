@@ -1,6 +1,7 @@
 """多实例管理模块 - 支持多个服务实例"""
 
 import json
+import logging
 import socket
 import time
 from datetime import datetime
@@ -9,6 +10,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 from pydantic import BaseModel
+
+logger = logging.getLogger("iflow2api")
 
 
 class InstanceStatus(Enum):
@@ -88,7 +91,7 @@ class InstanceManager:
 
                 self._instances[config.id] = InstanceInfo(config=config)
             except Exception as e:
-                print(f"[iflow2api] 加载实例配置失败 {instance_file}: {e}")
+                logger.warning("加载实例配置失败 %s: %s", instance_file, e)
 
     def _save_instance(self, instance_id: str) -> bool:
         """保存实例配置"""
@@ -113,7 +116,7 @@ class InstanceManager:
                 }, f, indent=2, ensure_ascii=False)
             return True
         except Exception as e:
-            print(f"[iflow2api] 保存实例配置失败: {e}")
+            logger.warning("保存实例配置失败: %s", e)
             return False
 
     def _delete_instance_file(self, instance_id: str) -> bool:
@@ -124,7 +127,7 @@ class InstanceManager:
                 config_path.unlink()
             return True
         except Exception as e:
-            print(f"[iflow2api] 删除实例配置失败: {e}")
+            logger.warning("删除实例配置失败: %s", e)
             return False
 
     @staticmethod
