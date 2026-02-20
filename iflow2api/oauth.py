@@ -144,12 +144,12 @@ class IFlowOAuth:
         """
         client = await self._get_client()
 
-        # 使用 Authorization 请求头传递 token，避免出现在 URL / 日志中（H-01 修复）
+        # iFlow API 要求 accessToken 作为 URL 查询参数传递
+        # 参考 iflow-cli 实现
         response = await client.get(
-            self.USER_INFO_URL,
+            f"{self.USER_INFO_URL}?accessToken={access_token}",
             headers={
                 "Accept": "application/json",
-                "Authorization": f"Bearer {access_token}",
             },
         )
 
