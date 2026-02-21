@@ -520,12 +520,25 @@ _refresher: Optional[OAuthTokenRefresher] = None
 _api_request_lock: Optional[asyncio.Semaphore] = None
 
 
+class IFlowNotConfiguredError(Exception):
+    """iFlow 未配置异常"""
+    pass
+
+
 def get_proxy() -> IFlowProxy:
-    """获取代理实例"""
+    """获取代理实例
+    
+    如果 iFlow 配置不存在，抛出 IFlowNotConfiguredError 异常。
+    """
     global _proxy, _config
     if _proxy is None:
-        _config = load_iflow_config()
-        _proxy = IFlowProxy(_config)
+        try:
+            _config = load_iflow_config()
+            _proxy = IFlowProxy(_config)
+        except (FileNotFoundError, ValueError) as e:
+            raise IFlowNotConfiguredError(
+                "iFlow 未配置，请通过 WebUI 完成登录: http://localhost:28000/admin"
+            ) from e
     return _proxy
 
 
@@ -550,14 +563,27 @@ def update_proxy_token(token_data: dict):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期管理"""
-    global _refresher, _proxy, _api_request_lock
+    """应用生命周期管理
+    
+    支持无配置启动：如果 iFlow 配置不存在，服务仍可启动，
+    用户可通过 WebUI OAuth 登录完成配置。
+    """
+    global _refresher, _proxy, _api_request_lock, _config
     # 启动时打印版本和系统信息
     logger.info("%s", get_startup_info())
     
-    # 启动时检查配置
+    # 初始化并发信号量（无论是否有配置都需要）
+    from .settings import load_settings
+    settings = load_settings()
+    _api_request_lock = asyncio.Semaphore(settings.api_concurrency)
+    logger.info("上游 API 并发数: %d", settings.api_concurrency)
+    if settings.api_concurrency > 1:
+        logger.warning("警告: 并发数 > 1 可能导致上游 API 返回 429 限流错误，建议保持默认值 1")
+    
+    # 尝试加载 iFlow 配置（可选）
     try:
         config = load_iflow_config()
+        _config = config
         logger.info("已加载 iFlow 配置")
         logger.info("API Base URL: %s", config.base_url)
         logger.info("API Key: ****%s (masked)", config.api_key[-4:])
@@ -570,23 +596,12 @@ async def lifespan(app: FastAPI):
         _refresher.start()
         logger.info("已启动 Token 自动刷新任务")
         
-        # 初始化并发信号量
-        from .settings import load_settings
-        settings = load_settings()
-        
-        # 初始化上游 API 并发信号量
-        _api_request_lock = asyncio.Semaphore(settings.api_concurrency)
-        logger.info("上游 API 并发数: %d", settings.api_concurrency)
-        if settings.api_concurrency > 1:
-            logger.warning("警告: 并发数 > 1 可能导致上游 API 返回 429 限流错误，建议保持默认值 1")
-        
-    except FileNotFoundError as e:
-        logger.error("%s", e)
-        logger.error("请先运行 'iflow' 命令并完成登录")
-        sys.exit(1)
+    except FileNotFoundError:
+        logger.warning("iFlow 配置文件不存在，请通过 WebUI 完成登录")
+        logger.warning("访问 http://localhost:%d/admin 进入管理界面", settings.port)
     except ValueError as e:
-        logger.error("%s", e)
-        sys.exit(1)
+        logger.warning("iFlow 配置文件格式错误: %s", e)
+        logger.warning("请通过 WebUI 重新登录")
 
     yield
 
@@ -937,6 +952,8 @@ async def list_models():
     try:
         proxy = get_proxy()
         return await proxy.get_models()
+    except IFlowNotConfiguredError as e:
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1079,7 +1096,11 @@ OpenAI 兼容的 Chat Completions API 端点。
 @app.post("/api/v1/chat/completions/")
 async def chat_completions_openai(request: Request):
     """Chat Completions API - OpenAI 格式"""
-    proxy = get_proxy()
+    try:
+        proxy = get_proxy()
+    except IFlowNotConfiguredError as e:
+        return create_error_response(503, str(e), "iflow_not_configured")
+    
     try:
         body_bytes = await request.body()
         body = json.loads(body_bytes.decode("utf-8"))
@@ -1332,7 +1353,13 @@ async def messages_anthropic(request: Request):
         logger.info("Anthropic 格式请求: model=%s → %s, stream=%s",
                      original_model, mapped_model, stream)
 
-        proxy = get_proxy()
+        try:
+            proxy = get_proxy()
+        except IFlowNotConfiguredError as e:
+            return JSONResponse(
+                status_code=503,
+                content={"type": "error", "error": {"type": "iflow_not_configured", "message": str(e)}}
+            )
 
         if stream:
             # 流式响应 - 转换为 Anthropic SSE 格式
@@ -1525,6 +1552,11 @@ async def messages_anthropic(request: Request):
 async def root_post(request: Request):
     """根路径 POST - 尝试自动检测格式"""
     try:
+        proxy = get_proxy()
+    except IFlowNotConfiguredError as e:
+        return create_error_response(503, str(e), "iflow_not_configured")
+    
+    try:
         body_bytes = await request.body()
         body = json.loads(body_bytes.decode("utf-8"))
         
@@ -1533,8 +1565,6 @@ async def root_post(request: Request):
         # 但为了安全起见，默认使用 OpenAI 格式
         stream = body.get("stream", False)
         model = body.get("model", "unknown")
-        
-        proxy = get_proxy()
         
         if stream:
             # 流式响应 - 整个流式传输过程都在锁内进行
@@ -1680,13 +1710,17 @@ def main():
         print(f"iflow2api {get_version()}")
         sys.exit(0)
 
-    # 检查是否已登录
-    if not check_iflow_login():
-        logger.error("iFlow 未登录，请先运行 'iflow' 命令并完成登录")
-        sys.exit(1)
-
-    # 加载配置
+    # 加载配置（需要在检查登录状态之前加载，以便获取端口信息）
     settings = load_settings()
+
+    # 检查是否已登录（Docker 环境下允许无配置启动，用户可通过 WebUI 登录）
+    if not check_iflow_login():
+        if is_docker():
+            logger.warning("iFlow 未登录，请通过 WebUI 完成登录")
+            logger.warning("访问 http://localhost:%d/admin 进入管理界面", settings.port)
+        else:
+            logger.error("iFlow 未登录，请先运行 'iflow' 命令并完成登录")
+            sys.exit(1)
 
     # 命令行参数优先于配置文件
     host = args.host if args.host else settings.host
