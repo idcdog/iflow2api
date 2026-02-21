@@ -4,7 +4,36 @@
 
 将 iFlow CLI 的 AI 服务暴露为 OpenAI 兼容 API。
 
+[![PyPI version](https://img.shields.io/pypi/v/iflow2api.svg)](https://pypi.org/project/iflow2api/)
+[![Python](https://img.shields.io/pypi/pyversions/iflow2api.svg)](https://pypi.org/project/iflow2api/)
+[![License](https://img.shields.io/github/license/cacaview/iflow2api.svg)](LICENSE)
+
 ##### **我们在[这里](https://github.com/cacaview/iflow2api-sdk)发布了我们的SDK！欢迎来进行使用！**
+
+## 安装
+
+### 从 PyPI 安装（推荐）
+
+```bash
+pip install iflow2api
+```
+
+安装后即可使用：
+
+```bash
+iflow2api          # 命令行模式
+iflow2api-gui      # GUI 模式
+```
+
+### 从源码安装
+
+```bash
+# 使用 uv (推荐)
+uv pip install -e .
+
+# 或使用 pip
+pip install -e .
+```
 
 ## 功能
 
@@ -97,16 +126,6 @@ iflow
 
 - Windows: `C:\Users\<用户名>\.iflow\settings.json`
 - Linux/Mac: `~/.iflow/settings.json`
-
-## 安装
-
-```bash
-# 使用 uv (推荐)
-uv pip install -e .
-
-# 或使用 pip
-pip install -e .
-```
 
 ## 使用
 

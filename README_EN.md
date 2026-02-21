@@ -4,7 +4,36 @@ English Documentation | [简体中文](README.md)
 
 Exposes iFlow CLI's AI services as an OpenAI-compatible API.
 
+[![PyPI version](https://img.shields.io/pypi/v/iflow2api.svg)](https://pypi.org/project/iflow2api/)
+[![Python](https://img.shields.io/pypi/pyversions/iflow2api.svg)](https://pypi.org/project/iflow2api/)
+[![License](https://img.shields.io/github/license/cacaview/iflow2api.svg)](LICENSE)
+
 ##### **We released our SDK [here](https://github.com/cacaview/iflow2api-sdk)! Welcome to use it!**
+
+## Installation
+
+### Install from PyPI (Recommended)
+
+```bash
+pip install iflow2api
+```
+
+After installation, you can use:
+
+```bash
+iflow2api          # CLI mode
+iflow2api-gui      # GUI mode
+```
+
+### Install from Source
+
+```bash
+# Using uv (recommended)
+uv pip install -e .
+
+# Or using pip
+pip install -e .
+```
 
 ## Features
 
@@ -97,16 +126,6 @@ After logging in, the configuration file will be automatically generated:
 
 - Windows: `C:\Users\<username>\.iflow\settings.json`
 - Linux/Mac: `~/.iflow/settings.json`
-
-## Installation
-
-```bash
-# Using uv (recommended)
-uv pip install -e .
-
-# Or using pip
-pip install -e .
-```
 
 ## Usage
 
