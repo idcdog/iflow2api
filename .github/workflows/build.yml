@@ -144,6 +144,7 @@ jobs:
             ghcr.io/${{ github.repository }}
           tags: |
             type=raw,value=edge
+            type=raw,value=latest
             type=sha,format=short
 
       - name: Extract metadata for release

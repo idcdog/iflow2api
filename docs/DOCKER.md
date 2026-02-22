@@ -125,10 +125,10 @@ docker pull --platform linux/amd64 iflow2api:latest
 ### 使用示例
 
 ```bash
-# 拉取最新稳定版（推荐）
+# 拉取最新版本（跟随 main 自动更新）
 docker pull ghcr.io/idcdog/iflow2api:latest
 
-# 拉取开发版（体验最新功能）
+# 拉取开发版（同样跟随 main，保留该标签便于区分）
 docker pull ghcr.io/idcdog/iflow2api:edge
 
 # 拉取特定版本
