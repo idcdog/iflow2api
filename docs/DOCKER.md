@@ -109,9 +109,9 @@ Docker 镜像支持以下架构：
 docker pull --platform linux/amd64 iflow2api:latest
 ```
 
-## Docker Hub
+## GHCR（推荐）
 
-镜像已发布到 Docker Hub，支持滚动发布策略：
+镜像已发布到 GitHub Container Registry（GHCR），支持滚动发布策略：
 
 ### 可用标签
 
@@ -126,20 +126,20 @@ docker pull --platform linux/amd64 iflow2api:latest
 
 ```bash
 # 拉取最新稳定版（推荐）
-docker pull cacaview/iflow2api:latest
+docker pull ghcr.io/idcdog/iflow2api:latest
 
 # 拉取开发版（体验最新功能）
-docker pull cacaview/iflow2api:edge
+docker pull ghcr.io/idcdog/iflow2api:edge
 
 # 拉取特定版本
-docker pull cacaview/iflow2api:1.1.5
+docker pull ghcr.io/idcdog/iflow2api:1.1.5
 
-# 使用 Docker Hub 镜像运行
+# 使用 GHCR 镜像运行
 docker run -d \
   --name iflow2api \
   -p 28000:28000 \
   -v ~/.iflow:/home/appuser/.iflow:ro \
-  cacaview/iflow2api:latest
+  ghcr.io/idcdog/iflow2api:latest
 ```
 
 > **注意**：`edge` 标签跟随 main 分支开发进度，可能包含未发布的功能，不建议在生产环境使用。

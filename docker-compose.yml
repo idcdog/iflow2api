@@ -1,41 +1,55 @@
-# iFlow2API Docker Compose 配置
-# 用于快速部署 iFlow2API 服务
-
-version: '3.8'
+# iFlow2API Docker Compose（生产部署友好版）
+#
+# 推荐用法：
+# 1) 仅通过环境变量配置 API Key（无需宿主机 ~/.iflow）
+#    IFLOW_API_KEY=sk-xxx docker compose up -d
+# 2) 或者挂载宿主机 ~/.iflow（已登录 iflow-cli 的机器）
+#
+# 注意：
+# - 管理后台首次登录会创建首个管理员账号（README 中的 admin/admin 可能并非真实默认值）
+# - WebUI OAuth 登录需要可写的配置目录（本文件默认使用 volume 持久化）
 
 services:
   iflow2api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: iflow2api:latest
+    # 生产建议直接使用 Docker Hub 镜像
+    # 如需本地源码构建：
+    #   docker build -t iflow2api:local .
+    #   IFLOW2API_IMAGE=iflow2api:local docker compose up -d
+    # 默认使用 GHCR 镜像（本仓库 CI 会自动推送）
+    image: "${IFLOW2API_IMAGE:-ghcr.io/idcdog/iflow2api:latest}"
     container_name: iflow2api
     restart: unless-stopped
     ports:
-      - "28000:28000"
+      # 默认仅绑定本机；如需对外暴露可将 BIND_ADDR 改为 0.0.0.0
+      - "${BIND_ADDR:-127.0.0.1}:${PORT:-28000}:${PORT:-28000}"
     environment:
-      # 服务配置
-      - HOST=0.0.0.0
-      - PORT=28000
-      # iFlow 配置 (可选，也可以通过挂载配置文件)
+      HOST: "${HOST:-0.0.0.0}"
+      PORT: "${PORT:-28000}"
+
+      # iFlow 配置（可选）：通过环境变量生成 /home/appuser/.iflow/settings.json
       # - IFLOW_API_KEY=sk-xxx
-      # - IFLOW_BASE_URL=https://apis.iflow.cn/v1
-      # 速率限制配置
-      - RATE_LIMIT_ENABLED=true
-      - RATE_LIMIT_PER_MINUTE=60
-      - RATE_LIMIT_PER_HOUR=1000
-      - RATE_LIMIT_PER_DAY=10000
+      IFLOW_API_KEY: "${IFLOW_API_KEY:-}"
+      IFLOW_BASE_URL: "${IFLOW_BASE_URL:-https://apis.iflow.cn/v1}"
+      IFLOW_AUTH_TYPE: "${IFLOW_AUTH_TYPE:-api-key}"
+      # IFLOW_API_KEY_FORCE: "1"
+
+      # 可选：自定义 API 鉴权（给你的客户端再加一道门）
+      # IFLOW2API_CUSTOM_API_KEY: "your-key"
+      # IFLOW2API_CUSTOM_AUTH_HEADER: "Authorization"
     volumes:
-      # 挂载 iFlow 配置目录 (包含 API Key 和 OAuth Token)
-      - ~/.iflow:/home/appuser/.iflow:ro
-      # 挂载应用配置目录
+      # 持久化 iFlow 配置（包含 settings.json，WebUI/OAuth/Token 刷新会写入）
+      - iflow2api-iflow:/home/appuser/.iflow
+      # 持久化 iflow2api 配置与管理后台账号信息
       - iflow2api-config:/home/appuser/.iflow2api
+
+      # 可选：使用宿主机已登录的 ~/.iflow（通常用于开发机/单机）
+      # - ${HOME}/.iflow:/home/appuser/.iflow
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:28000/health"]
+      test: ["CMD-SHELL", "curl -fsS \"http://localhost:${PORT:-28000}/health\" || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 5s
+      start_period: 10s
     logging:
       driver: "json-file"
       options:
@@ -43,5 +57,7 @@ services:
         max-file: "3"
 
 volumes:
+  iflow2api-iflow:
+    driver: local
   iflow2api-config:
     driver: local

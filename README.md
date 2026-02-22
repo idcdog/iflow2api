@@ -182,17 +182,17 @@ iflow2api --version
 
 ## Docker 部署
 
-镜像已发布到 Docker Hub，支持滚动发布：
+镜像已发布到 GHCR（GitHub Container Registry），支持滚动发布：
 
 ```bash
 # 使用最新稳定版（推荐）
-docker pull cacaview/iflow2api:latest
+docker pull ghcr.io/idcdog/iflow2api:latest
 
 # 使用开发版（体验最新功能）
-docker pull cacaview/iflow2api:edge
+docker pull ghcr.io/idcdog/iflow2api:edge
 
 # 使用特定版本
-docker pull cacaview/iflow2api:1.1.5
+docker pull ghcr.io/idcdog/iflow2api:1.1.5
 ```
 
 或使用 docker-compose：
