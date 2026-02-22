@@ -20,8 +20,8 @@ services:
     container_name: iflow2api
     restart: always
     ports:
-      # 默认监听 0.0.0.0；如需仅本机访问可设置 BIND_ADDR=127.0.0.1
-      - "${BIND_ADDR:-0.0.0.0}:${PORT:-28000}:${PORT:-28000}"
+      # 对外映射端口（默认监听所有网卡）
+      - "${PORT:-28000}:${PORT:-28000}"
     environment:
       HOST: "${HOST:-0.0.0.0}"
       PORT: "${PORT:-28000}"
