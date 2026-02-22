@@ -170,6 +170,7 @@
 
                 <!-- 设置页面 -->
                 <section id="settings-section" class="section">
+                    <div class="settings-grid">
                     <!-- iFlow 配置 -->
                     <div class="card">
                         <div class="card-header">
@@ -178,6 +179,7 @@
                         </div>
                         <div class="card-body">
                             <form id="iflow-settings-form">
+                                <div class="form-grid">
                                 <div class="form-group">
                                     <label for="setting-api-key">API Key</label>
                                     <input type="password" id="setting-api-key" name="api_key" placeholder="输入 API Key">
@@ -186,13 +188,14 @@
                                     <label for="setting-base-url">Base URL</label>
                                     <input type="text" id="setting-base-url" name="base_url" placeholder="https://apis.iflow.cn/v1">
                                 </div>
-                                <div class="form-group">
+                                <div class="form-group span-2">
                                     <label for="setting-public-base-url">回调 Base URL</label>
                                     <div class="input-with-actions">
                                         <input type="text" id="setting-public-base-url" name="public_base_url" placeholder="https://你的域名 或 http://192.168.1.2:28000（也可直接填 192.168.1.2:28000）">
                                         <button type="button" id="fill-public-base-url-btn" class="btn btn-secondary btn-sm">使用当前地址</button>
                                     </div>
                                     <div class="form-hint">用于 iFlow OAuth 回调地址，必须能从浏览器访问到本服务（建议 HTTPS，且不要以 / 结尾）。点击“使用当前地址”可自动填入你当前访问管理后台的地址。</div>
+                                </div>
                                 </div>
                                 <div class="form-row">
                                     <button type="button" id="import-cli-btn" class="btn btn-secondary">从 iFlow CLI 导入</button>
@@ -209,6 +212,7 @@
                         </div>
                         <div class="card-body">
                             <form id="server-settings-form">
+                                <div class="form-grid">
                                 <div class="form-group">
                                     <label for="setting-host">监听地址</label>
                                     <input type="text" id="setting-host" name="host">
@@ -217,32 +221,6 @@
                                     <label for="setting-port">端口</label>
                                     <input type="number" id="setting-port" name="port" min="1" max="65535">
                                 </div>
-                            </form>
-                        </div>
-                    </div>
-
-                    <div class="card">
-                        <div class="card-header">
-                            <span class="icon">🚀</span>
-                            <span>启动设置</span>
-                        </div>
-                        <div class="card-body">
-                            <form id="startup-settings-form">
-                                <div class="form-group checkbox">
-                                    <input type="checkbox" id="setting-auto-start" name="auto_start">
-                                    <label for="setting-auto-start">开机自启动</label>
-                                </div>
-                                <div class="form-group checkbox">
-                                    <input type="checkbox" id="setting-start-minimized" name="start_minimized">
-                                    <label for="setting-start-minimized">启动时最小化</label>
-                                </div>
-                                <div class="form-group checkbox">
-                                    <input type="checkbox" id="setting-minimize-to-tray" name="minimize_to_tray">
-                                    <label for="setting-minimize-to-tray">关闭时最小化到托盘</label>
-                                </div>
-                                <div class="form-group checkbox">
-                                    <input type="checkbox" id="setting-auto-run-server" name="auto_run_server">
-                                    <label for="setting-auto-run-server">启动时自动运行服务</label>
                                 </div>
                             </form>
                         </div>
@@ -255,6 +233,7 @@
                         </div>
                         <div class="card-body">
                             <form id="ui-settings-form">
+                                <div class="form-grid">
                                 <div class="form-group">
                                     <label for="setting-theme">主题</label>
                                     <select id="setting-theme" name="theme_mode">
@@ -269,6 +248,7 @@
                                         <option value="zh">中文</option>
                                         <option value="en">English</option>
                                     </select>
+                                </div>
                                 </div>
                             </form>
                         </div>
@@ -297,9 +277,11 @@
                         </div>
                         <div class="card-body">
                             <form id="api-settings-form">
-                                <div class="form-group">
-                                    <label for="setting-api-concurrency">并发数</label>
-                                    <input type="number" id="setting-api-concurrency" name="api_concurrency" min="1" max="10" value="1">
+                                <div class="form-grid">
+                                    <div class="form-group">
+                                        <label for="setting-api-concurrency">并发数</label>
+                                        <input type="number" id="setting-api-concurrency" name="api_concurrency" min="1" max="10" value="1">
+                                    </div>
                                 </div>
                                 <p class="hint">上游 API 同时处理的请求数量（1-10）。警告：过高的并发数可能导致上游 API 返回 429 限流错误，建议保持默认值 1</p>
                             </form>
@@ -313,6 +295,7 @@
                         </div>
                         <div class="card-body">
                             <form id="security-settings-form">
+                                <div class="form-grid">
                                 <div class="form-group">
                                     <label for="setting-custom-api-key">API 密钥</label>
                                     <input type="password" id="setting-custom-api-key" name="custom_api_key" placeholder="留空则不验证">
@@ -321,9 +304,11 @@
                                     <label for="setting-custom-auth-header">授权标头名称</label>
                                     <input type="text" id="setting-custom-auth-header" name="custom_auth_header" placeholder="如：Authorization, cs-sk-key 等">
                                 </div>
+                                </div>
                                 <p class="hint">设置 API 密钥后，客户端请求时需携带此密钥进行验证</p>
                             </form>
                         </div>
+                    </div>
                     </div>
 
                     <div class="actions-bar">

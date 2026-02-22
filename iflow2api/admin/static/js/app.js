@@ -306,12 +306,6 @@ async function loadSettings() {
         document.getElementById('setting-host').value = data.host || '';
         document.getElementById('setting-port').value = data.port || 28000;
         
-        // 填充启动设置
-        document.getElementById('setting-auto-start').checked = data.auto_start || false;
-        document.getElementById('setting-start-minimized').checked = data.start_minimized || false;
-        document.getElementById('setting-minimize-to-tray').checked = data.close_action === 'minimize_to_tray';
-        document.getElementById('setting-auto-run-server').checked = data.auto_run_server || false;
-        
         // 填充界面设置
         document.getElementById('setting-theme').value = data.theme_mode || 'system';
         document.getElementById('setting-language').value = data.language || 'zh';
@@ -398,11 +392,6 @@ async function saveSettings() {
         // 服务器配置
         host: document.getElementById('setting-host').value,
         port: parseInt(document.getElementById('setting-port').value),
-        // 启动设置
-        auto_start: document.getElementById('setting-auto-start').checked,
-        start_minimized: document.getElementById('setting-start-minimized').checked,
-        close_action: document.getElementById('setting-minimize-to-tray').checked ? 'minimize_to_tray' : 'exit',
-        auto_run_server: document.getElementById('setting-auto-run-server').checked,
         // 界面设置
         theme_mode: document.getElementById('setting-theme').value,
         language: document.getElementById('setting-language').value,
