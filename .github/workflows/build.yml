@@ -64,9 +64,6 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: macos-latest
-            platform: macos
-            artifact: iflow2api.app
           - os: ubuntu-latest
             platform: linux
             artifact: iflow2api
@@ -99,11 +96,6 @@ jobs:
         shell: bash
         run: |
           echo "y" | flet build ${{ matrix.platform }} --project iflow2api --product iflow2api
-
-      - name: Fix macOS executable permissions
-        if: matrix.os == 'macos-latest'
-        run: |
-          chmod +x build/macos/iflow2api.app/Contents/MacOS/iflow2api
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
