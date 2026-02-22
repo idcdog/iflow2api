@@ -219,28 +219,8 @@ jobs:
           path: dist/
           retention-days: 1
 
-  # 发布到正式 PyPI（仅 tag 触发）
-  publish-pypi:
-    needs: [verify-version, build-pypi]
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    environment: DOCKERHUB
-    permissions:
-      id-token: write
-    steps:
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: pypi-packages
-          path: dist/
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_KEY }}
-
   release:
-    needs: [verify-version, build, docker, publish-pypi]
+    needs: [verify-version, build, docker, build-pypi]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
 
