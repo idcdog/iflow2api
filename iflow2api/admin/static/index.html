@@ -188,8 +188,11 @@
                                 </div>
                                 <div class="form-group">
                                     <label for="setting-public-base-url">回调 Base URL</label>
-                                    <input type="text" id="setting-public-base-url" name="public_base_url" placeholder="https://你的域名 或 http://192.168.1.2:28000（也可直接填 192.168.1.2:28000）">
-                                    <div class="form-hint">用于 iFlow OAuth 回调地址，必须能从浏览器访问到本服务（建议 HTTPS，且不要以 / 结尾）。</div>
+                                    <div class="input-with-actions">
+                                        <input type="text" id="setting-public-base-url" name="public_base_url" placeholder="https://你的域名 或 http://192.168.1.2:28000（也可直接填 192.168.1.2:28000）">
+                                        <button type="button" id="fill-public-base-url-btn" class="btn btn-secondary btn-sm">使用当前地址</button>
+                                    </div>
+                                    <div class="form-hint">用于 iFlow OAuth 回调地址，必须能从浏览器访问到本服务（建议 HTTPS，且不要以 / 结尾）。点击“使用当前地址”可自动填入你当前访问管理后台的地址。</div>
                                 </div>
                                 <div class="form-row">
                                     <button type="button" id="import-cli-btn" class="btn btn-secondary">从 iFlow CLI 导入</button>

@@ -343,6 +343,16 @@ function normalizePublicBaseUrl(value) {
     return raw;
 }
 
+function suggestPublicBaseUrlFromCurrentPage() {
+    // 示例：
+    // - https://example.com/admin  -> https://example.com
+    // - https://example.com/foo/admin -> https://example.com/foo
+    const origin = window.location.origin;
+    const path = window.location.pathname || '/';
+    const basePath = path.replace(/\/admin(?:\/.*)?$/, '');
+    return normalizePublicBaseUrl(`${origin}${basePath}`);
+}
+
 function isValidPublicBaseUrl(value) {
     const normalized = normalizePublicBaseUrl(value);
     if (!normalized) return false;
@@ -361,6 +371,19 @@ function updateOauthLoginButtonState() {
     const ok = isValidPublicBaseUrl(input.value || '');
     btn.disabled = !ok;
     btn.title = ok ? '' : '请先填写有效的回调 Base URL（如 https://api.example.com、http://192.168.1.2:28000 或 localhost:28000）';
+}
+
+function fillPublicBaseUrlFromCurrentPage() {
+    const input = document.getElementById('setting-public-base-url');
+    if (!input) return;
+    const suggested = suggestPublicBaseUrlFromCurrentPage();
+    if (!suggested) {
+        showToast('无法获取当前页面地址，请手动填写回调 Base URL', 'error');
+        return;
+    }
+    input.value = suggested;
+    updateOauthLoginButtonState();
+    showToast('已填入当前访问地址，记得点击“保存设置”进行持久化', 'success');
 }
 
 /**
@@ -719,6 +742,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('import-cli-btn').addEventListener('click', importFromCli);
     document.getElementById('oauth-login-btn').addEventListener('click', oauthLogin);
     document.getElementById('setting-public-base-url').addEventListener('input', updateOauthLoginButtonState);
+    document.getElementById('fill-public-base-url-btn').addEventListener('click', fillPublicBaseUrlFromCurrentPage);
 
     // 添加用户表单
     document.getElementById('add-user-form').addEventListener('submit', (e) => {
