@@ -219,27 +219,6 @@ jobs:
           path: dist/
           retention-days: 1
 
-  # 发布到 TestPyPI（每次推送都执行）
-  publish-testpypi:
-    needs: build-pypi
-    runs-on: ubuntu-latest
-    environment: DOCKERHUB
-    permissions:
-      id-token: write
-    steps:
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: pypi-packages
-          path: dist/
-
-      - name: Publish to TestPyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-          password: ${{ secrets.TEST_PYPI_API_KEY }}
-          skip-existing: true
-
   # 发布到正式 PyPI（仅 tag 触发）
   publish-pypi:
     needs: [verify-version, build-pypi]
@@ -274,16 +253,12 @@ jobs:
       - name: Create archives
         run: |
           cd artifacts
-          zip -r iflow2api-windows.zip iflow2api-windows/
-          tar -czvf iflow2api-macos.tar.gz iflow2api-macos/
           tar -czvf iflow2api-linux.tar.gz iflow2api-linux/
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            artifacts/iflow2api-windows.zip
-            artifacts/iflow2api-macos.tar.gz
             artifacts/iflow2api-linux.tar.gz
             artifacts/pypi-packages/*
           generate_release_notes: true
