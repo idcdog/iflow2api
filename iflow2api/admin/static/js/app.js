@@ -300,6 +300,7 @@ async function loadSettings() {
         // 填充 iFlow 配置
         document.getElementById('setting-api-key').value = data.api_key || '';
         document.getElementById('setting-base-url').value = data.base_url || '';
+        document.getElementById('setting-public-base-url').value = data.public_base_url || '';
         
         // 填充服务器配置
         document.getElementById('setting-host').value = data.host || '';
@@ -325,9 +326,31 @@ async function loadSettings() {
         document.getElementById('setting-custom-api-key').value = data.custom_api_key || '';
         document.getElementById('setting-custom-auth-header').value = data.custom_auth_header || '';
 
+        // 更新 OAuth 按钮状态
+        updateOauthLoginButtonState();
     } catch (error) {
         console.error('Load settings error:', error);
     }
+}
+
+function isValidPublicBaseUrl(value) {
+    if (!value) return false;
+    try {
+        const url = new URL(value);
+        return url.protocol === 'http:' || url.protocol === 'https:';
+    } catch (e) {
+        return false;
+    }
+}
+
+function updateOauthLoginButtonState() {
+    const input = document.getElementById('setting-public-base-url');
+    const btn = document.getElementById('oauth-login-btn');
+    if (!input || !btn) return;
+    const value = (input.value || '').trim().replace(/\/+$/, '');
+    const ok = isValidPublicBaseUrl(value);
+    btn.disabled = !ok;
+    btn.title = ok ? '' : '请先填写有效的回调 Base URL（如 https://api.example.com 或 http://localhost:28000）';
 }
 
 /**
@@ -338,6 +361,7 @@ async function saveSettings() {
         // iFlow 配置
         api_key: document.getElementById('setting-api-key').value,
         base_url: document.getElementById('setting-base-url').value,
+        public_base_url: document.getElementById('setting-public-base-url').value,
         // 服务器配置
         host: document.getElementById('setting-host').value,
         port: parseInt(document.getElementById('setting-port').value),
@@ -391,6 +415,14 @@ let _oauthMessageHandler = null;
 
 async function oauthLogin() {
     try {
+        // 前置校验：必须配置回调 Base URL（远端部署依赖此项生成 redirect_uri）
+        const publicBaseUrl = (document.getElementById('setting-public-base-url')?.value || '').trim().replace(/\/+$/, '');
+        if (!isValidPublicBaseUrl(publicBaseUrl)) {
+            showToast('请先在设置中填写有效的回调 Base URL（如 https://api.example.com 或 http://localhost:28000）', 'error');
+            updateOauthLoginButtonState();
+            return;
+        }
+
         // 获取 OAuth URL
         const data = await apiRequest('/oauth/url');
         const authUrl = data.auth_url;
@@ -673,6 +705,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // iFlow 配置按钮
     document.getElementById('import-cli-btn').addEventListener('click', importFromCli);
     document.getElementById('oauth-login-btn').addEventListener('click', oauthLogin);
+    document.getElementById('setting-public-base-url').addEventListener('input', updateOauthLoginButtonState);
 
     // 添加用户表单
     document.getElementById('add-user-form').addEventListener('submit', (e) => {

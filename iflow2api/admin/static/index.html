@@ -186,9 +186,14 @@
                                     <label for="setting-base-url">Base URL</label>
                                     <input type="text" id="setting-base-url" name="base_url" placeholder="https://apis.iflow.cn/v1">
                                 </div>
+                                <div class="form-group">
+                                    <label for="setting-public-base-url">回调 Base URL</label>
+                                    <input type="text" id="setting-public-base-url" name="public_base_url" placeholder="https://你的域名 或 http://localhost:28000">
+                                    <div class="form-hint">用于 iFlow OAuth 回调地址，必须能从浏览器访问到本服务（建议 HTTPS，且不要以 / 结尾）。</div>
+                                </div>
                                 <div class="form-row">
                                     <button type="button" id="import-cli-btn" class="btn btn-secondary">从 iFlow CLI 导入</button>
-                                    <button type="button" id="oauth-login-btn" class="btn btn-primary">Login with iFlow</button>
+                                    <button type="button" id="oauth-login-btn" class="btn btn-primary" disabled>Login with iFlow</button>
                                 </div>
                             </form>
                         </div>

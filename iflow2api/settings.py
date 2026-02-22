@@ -33,6 +33,10 @@ class AppSettings(BaseModel):
     oauth_refresh_token: str = ""
     oauth_expires_at: Optional[str] = None
 
+    # 公网访问地址（用于 WebUI OAuth 回调）
+    # 示例：http://localhost:28000 或 https://api.example.com
+    public_base_url: str = ""
+
     # 应用设置
     auto_start: bool = False
     start_minimized: bool = False
@@ -159,6 +163,9 @@ def load_settings() -> AppSettings:
                     settings.oauth_refresh_token = _decrypt_token(data["oauth_refresh_token"])
                 if "oauth_expires_at" in data:
                     settings.oauth_expires_at = data["oauth_expires_at"]
+                # 公网访问地址
+                if "public_base_url" in data:
+                    settings.public_base_url = data["public_base_url"]
                 # 更新检查设置
                 if "check_update_on_startup" in data:
                     settings.check_update_on_startup = data["check_update_on_startup"]
@@ -218,6 +225,8 @@ def save_settings(settings: AppSettings) -> None:
         "oauth_access_token": _encrypt_token(settings.oauth_access_token),
         "oauth_refresh_token": _encrypt_token(settings.oauth_refresh_token),
         "oauth_expires_at": settings.oauth_expires_at,
+        # 公网访问地址（用于 OAuth 回调）
+        "public_base_url": settings.public_base_url,
         # 应用设置
         "auto_start": settings.auto_start,
         "start_minimized": settings.start_minimized,

@@ -56,6 +56,7 @@ class SettingsUpdate(BaseModel):
     language: Optional[str] = None
     api_key: Optional[str] = None
     base_url: Optional[str] = None
+    public_base_url: Optional[str] = None
     custom_api_key: Optional[str] = None
     custom_auth_header: Optional[str] = None
 
@@ -315,6 +316,7 @@ async def get_settings(username: str = Depends(get_current_user)) -> dict[str, A
         "language": settings.language,
         "api_key": settings.api_key,
         "base_url": settings.base_url,
+        "public_base_url": settings.public_base_url,
         "custom_api_key": settings.custom_api_key,
         "custom_auth_header": settings.custom_auth_header,
         # 不返回 OAuth 敏感信息
@@ -359,6 +361,8 @@ async def update_settings(
         settings.api_key = request.api_key
     if request.base_url is not None:
         settings.base_url = request.base_url
+    if request.public_base_url is not None:
+        settings.public_base_url = request.public_base_url
     if request.custom_api_key is not None:
         settings.custom_api_key = request.custom_api_key
     if request.custom_auth_header is not None:
@@ -407,11 +411,24 @@ async def get_oauth_url(
 ) -> dict[str, Any]:
     """获取 iFlow OAuth 登录 URL"""
     from ..oauth import IFlowOAuth
+    from ..settings import load_settings
     
     oauth = IFlowOAuth()
-    # 从请求中获取实际端口
-    port = request.url.port or 28000
-    redirect_uri = f"http://localhost:{port}/admin/oauth/callback"
+    settings = load_settings()
+    public_base_url = (settings.public_base_url or "").strip().rstrip("/")
+    if not public_base_url:
+        raise HTTPException(
+            status_code=400,
+            detail="请先在设置中填写回调 Base URL（公网访问地址），再进行 iFlow OAuth 登录",
+        )
+    from urllib.parse import urlparse
+    parsed = urlparse(public_base_url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise HTTPException(
+            status_code=400,
+            detail="回调 Base URL 格式不正确，请填写形如 https://你的域名 或 http://localhost:28000",
+        )
+    redirect_uri = f"{public_base_url}/admin/oauth/callback"
     auth_url = oauth.get_auth_url(redirect_uri=redirect_uri)
     
     return {
@@ -507,9 +524,21 @@ async def oauth_callback(
     from ..settings import load_settings, save_settings
     
     oauth = IFlowOAuth()
-    # 从请求中获取实际端口
-    port = fastapi_request.url.port or 28000
-    redirect_uri = f"http://localhost:{port}/admin/oauth/callback"
+    settings = load_settings()
+    public_base_url = (settings.public_base_url or "").strip().rstrip("/")
+    if not public_base_url:
+        raise HTTPException(
+            status_code=400,
+            detail="缺少回调 Base URL（公网访问地址），请先在设置中填写后再重试 OAuth 登录",
+        )
+    from urllib.parse import urlparse
+    parsed = urlparse(public_base_url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise HTTPException(
+            status_code=400,
+            detail="回调 Base URL 格式不正确，请先在设置中修正后再重试 OAuth 登录",
+        )
+    redirect_uri = f"{public_base_url}/admin/oauth/callback"
     
     try:
         # 使用授权码获取 token
@@ -526,8 +555,7 @@ async def oauth_callback(
         if not api_key:
             raise HTTPException(status_code=400, detail="无法获取 API Key")
         
-        # 保存配置
-        settings = load_settings()
+        # 保存配置（复用上面已加载的 settings）
         settings.api_key = api_key
         settings.auth_type = "oauth-iflow"
         settings.oauth_access_token = access_token
