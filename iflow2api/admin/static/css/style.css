@@ -149,12 +149,25 @@ body {
 
 .settings-grid {
     display: grid;
-    /* 提高最小列宽，避免超宽屏 4 列导致卡片过窄、文本换行过多 */
-    grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+    /* 统一三列布局：iFlow 配置可跨两列，其余均匀分布 */
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 20px;
     margin-bottom: 20px;
     align-items: start;
     grid-auto-flow: row dense;
+}
+
+.settings-span-2 {
+    grid-column: span 2;
+}
+
+.actions-card .actions-bar {
+    margin-top: 0;
+    flex-wrap: wrap;
+}
+
+.actions-card .btn {
+    min-width: 120px;
 }
 
 .settings-grid .card {
@@ -631,6 +644,16 @@ body {
 }
 
 /* 响应式设计 */
+@media (max-width: 1200px) {
+    .settings-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .settings-span-2 {
+        grid-column: span 2;
+    }
+}
+
 @media (max-width: 768px) {
     .sidebar {
         width: 60px;
@@ -666,6 +689,10 @@ body {
 
     .form-grid {
         grid-template-columns: 1fr;
+    }
+
+    .settings-span-2 {
+        grid-column: span 1;
     }
 
     .stats-grid {
