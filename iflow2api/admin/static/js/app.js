@@ -333,10 +333,21 @@ async function loadSettings() {
     }
 }
 
+function normalizePublicBaseUrl(value) {
+    const raw = (value || '').trim().replace(/\/+$/, '');
+    if (!raw) return '';
+    // 允许用户直接填写内网地址（如 192.168.1.2:28000 或 localhost:28000），默认补全为 http://
+    if (!/^https?:\/\//i.test(raw)) {
+        return `http://${raw}`;
+    }
+    return raw;
+}
+
 function isValidPublicBaseUrl(value) {
-    if (!value) return false;
+    const normalized = normalizePublicBaseUrl(value);
+    if (!normalized) return false;
     try {
-        const url = new URL(value);
+        const url = new URL(normalized);
         return url.protocol === 'http:' || url.protocol === 'https:';
     } catch (e) {
         return false;
@@ -347,10 +358,9 @@ function updateOauthLoginButtonState() {
     const input = document.getElementById('setting-public-base-url');
     const btn = document.getElementById('oauth-login-btn');
     if (!input || !btn) return;
-    const value = (input.value || '').trim().replace(/\/+$/, '');
-    const ok = isValidPublicBaseUrl(value);
+    const ok = isValidPublicBaseUrl(input.value || '');
     btn.disabled = !ok;
-    btn.title = ok ? '' : '请先填写有效的回调 Base URL（如 https://api.example.com 或 http://localhost:28000）';
+    btn.title = ok ? '' : '请先填写有效的回调 Base URL（如 https://api.example.com、http://192.168.1.2:28000 或 localhost:28000）';
 }
 
 /**
@@ -361,7 +371,7 @@ async function saveSettings() {
         // iFlow 配置
         api_key: document.getElementById('setting-api-key').value,
         base_url: document.getElementById('setting-base-url').value,
-        public_base_url: document.getElementById('setting-public-base-url').value,
+        public_base_url: normalizePublicBaseUrl(document.getElementById('setting-public-base-url').value),
         // 服务器配置
         host: document.getElementById('setting-host').value,
         port: parseInt(document.getElementById('setting-port').value),
@@ -388,6 +398,9 @@ async function saveSettings() {
             body: JSON.stringify(settings),
         });
         showToast('设置已保存', 'success');
+        // 回写规范化后的值，避免用户误以为必须以 https 开头
+        document.getElementById('setting-public-base-url').value = settings.public_base_url || '';
+        updateOauthLoginButtonState();
     } catch (error) {
         showToast(error.message, 'error');
     }
@@ -416,9 +429,9 @@ let _oauthMessageHandler = null;
 async function oauthLogin() {
     try {
         // 前置校验：必须配置回调 Base URL（远端部署依赖此项生成 redirect_uri）
-        const publicBaseUrl = (document.getElementById('setting-public-base-url')?.value || '').trim().replace(/\/+$/, '');
+        const publicBaseUrl = normalizePublicBaseUrl(document.getElementById('setting-public-base-url')?.value || '');
         if (!isValidPublicBaseUrl(publicBaseUrl)) {
-            showToast('请先在设置中填写有效的回调 Base URL（如 https://api.example.com 或 http://localhost:28000）', 'error');
+            showToast('请先在设置中填写有效的回调 Base URL（如 https://api.example.com、http://192.168.1.2:28000 或 localhost:28000）', 'error');
             updateOauthLoginButtonState();
             return;
         }

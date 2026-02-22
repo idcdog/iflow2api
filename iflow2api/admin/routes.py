@@ -16,6 +16,22 @@ from .auth import get_auth_manager
 from .websocket import get_connection_manager
 
 
+def _normalize_public_base_url(value: Optional[str]) -> str:
+    """规范化公网访问地址（用于 OAuth 回调）
+
+    允许用户填写：
+    - https://example.com
+    - http://192.168.1.2:28000
+    - 192.168.1.2:28000（自动补全为 http://）
+    """
+    raw = (value or "").strip().rstrip("/")
+    if not raw:
+        return ""
+    if "://" not in raw:
+        raw = f"http://{raw}"
+    return raw
+
+
 # 创建路由器
 admin_router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -362,7 +378,7 @@ async def update_settings(
     if request.base_url is not None:
         settings.base_url = request.base_url
     if request.public_base_url is not None:
-        settings.public_base_url = request.public_base_url
+        settings.public_base_url = _normalize_public_base_url(request.public_base_url)
     if request.custom_api_key is not None:
         settings.custom_api_key = request.custom_api_key
     if request.custom_auth_header is not None:
@@ -415,7 +431,7 @@ async def get_oauth_url(
     
     oauth = IFlowOAuth()
     settings = load_settings()
-    public_base_url = (settings.public_base_url or "").strip().rstrip("/")
+    public_base_url = _normalize_public_base_url(settings.public_base_url)
     if not public_base_url:
         raise HTTPException(
             status_code=400,
@@ -525,7 +541,7 @@ async def oauth_callback(
     
     oauth = IFlowOAuth()
     settings = load_settings()
-    public_base_url = (settings.public_base_url or "").strip().rstrip("/")
+    public_base_url = _normalize_public_base_url(settings.public_base_url)
     if not public_base_url:
         raise HTTPException(
             status_code=400,
