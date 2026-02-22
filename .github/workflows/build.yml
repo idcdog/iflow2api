@@ -64,9 +64,6 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: windows-latest
-            platform: windows
-            artifact: iflow2api.exe
           - os: macos-latest
             platform: macos
             artifact: iflow2api.app

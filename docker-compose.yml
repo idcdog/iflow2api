@@ -18,10 +18,10 @@ services:
     # 默认使用 GHCR 镜像（本仓库 CI 会自动推送）
     image: "${IFLOW2API_IMAGE:-ghcr.io/idcdog/iflow2api:latest}"
     container_name: iflow2api
-    restart: unless-stopped
+    restart: always
     ports:
-      # 默认仅绑定本机；如需对外暴露可将 BIND_ADDR 改为 0.0.0.0
-      - "${BIND_ADDR:-127.0.0.1}:${PORT:-28000}:${PORT:-28000}"
+      # 默认监听 0.0.0.0；如需仅本机访问可设置 BIND_ADDR=127.0.0.1
+      - "${BIND_ADDR:-0.0.0.0}:${PORT:-28000}:${PORT:-28000}"
     environment:
       HOST: "${HOST:-0.0.0.0}"
       PORT: "${PORT:-28000}"
